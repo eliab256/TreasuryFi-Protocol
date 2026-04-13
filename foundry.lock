@@ -1,0 +1,32 @@
+{
+  "lib/T-REX": {
+    "tag": {
+      "name": "4.1.6",
+      "rev": "a09cfd38aa257d56db7ff9c90f30e65f125a141b"
+    }
+  },
+  "lib/chainlink": {
+    "tag": {
+      "name": "v2.41.0",
+      "rev": "02d86f8457f642f965631cc22a223047d497a304"
+    }
+  },
+  "lib/erc-3525": {
+    "tag": {
+      "name": "v1.5.0",
+      "rev": "d80df770e34b0407b7e72551940f24f4334a289c"
+    }
+  },
+  "lib/forge-std": {
+    "tag": {
+      "name": "v1.15.0",
+      "rev": "0844d7e1fc5e60d77b68e469bff60265f236c398"
+    }
+  },
+  "lib/openzeppelin-contracts": {
+    "tag": {
+      "name": "v5.6.1",
+      "rev": "5fd1781b1454fd1ef8e722282f86f9293cacf256"
+    }
+  }
+}
