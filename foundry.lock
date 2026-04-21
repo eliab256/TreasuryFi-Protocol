@@ -5,10 +5,10 @@
       "rev": "a09cfd38aa257d56db7ff9c90f30e65f125a141b"
     }
   },
-  "lib/chainlink": {
+  "lib/chainlink-brownie-contracts": {
     "tag": {
-      "name": "v2.41.0",
-      "rev": "02d86f8457f642f965631cc22a223047d497a304"
+      "name": "1.3.0",
+      "rev": "5cb41fbc9b525338b6098da5ea7dd0b7e92f89e4"
     }
   },
   "lib/erc-3525": {
@@ -27,6 +27,12 @@
     "tag": {
       "name": "v5.6.1",
       "rev": "5fd1781b1454fd1ef8e722282f86f9293cacf256"
+    }
+  },
+  "lib/solidity": {
+    "tag": {
+      "name": "2.2.1",
+      "rev": "a483cda6821e3883497972d36d0c4c1e1693e483"
     }
   }
 }
