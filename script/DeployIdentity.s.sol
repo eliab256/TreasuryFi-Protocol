@@ -1,12 +1,12 @@
 //SPDX-License-Identifier: MIT
-pragma solidity ^0.8.34;
+pragma solidity >=0.8.17 <0.9.0;
 
 import {Script} from "forge-std/Script.sol";
 import {CodeConstants} from "./CodeConstants.sol";
 import {
     ClaimTopicsRegistry
 } from "@t-rex/registry/implementation/ClaimTopicsRegistry.sol";
-import {ClaimIssuer} from "@onchain-id/solidity/ClaimIssuer.sol";
+import {ClaimIssuer} from "@onchain-id/solidity/contracts/ClaimIssuer.sol";
 import {
     TrustedIssuersRegistry
 } from "@t-rex/registry/implementation/TrustedIssuersRegistry.sol";
@@ -24,8 +24,6 @@ contract DeployIdentity is Script, CodeConstants {
     IdentityRegistryStorage public identityRegistryStorage;
     IdentityRegistry public identityRegistry;
 
-
-
     function run() external {
         vm.startBroadcast();
         // 1.2.1 Deploy ClaimTopicsRegistry and call addClaimTopic to register topic 1 (KYC)
@@ -42,7 +40,7 @@ contract DeployIdentity is Script, CodeConstants {
         trustedIssuersRegistry.init();
         uint256[] memory claimTopics = claimTopicsRegistry.getClaimTopics();
         trustedIssuersRegistry.addTrustedIssuer(
-            address(claimIssuer),
+            claimIssuer,
             claimTopics
         );
 

@@ -1,5 +1,5 @@
 //SPDX-License-Identifier: MIT
-pragma solidity ^0.8.34;
+pragma solidity >=0.8.17 <0.9.0;
 
 abstract contract CodeConstants {
     uint256 internal constant KYC_CLAIM_TOPIC = 1;
@@ -13,6 +13,12 @@ abstract contract CodeConstants {
     address public constant SEPOLIA_FUNCIONS_ROUTER =
         0xb83E47C2bC239B3bf370bc41e1459A34b41238D0;
 
+    uint256 public constant SEPOLIA_DON_ID =
+        0x66756e2d657468657265756d2d7365706f6c69612d3100000000000000000000;
+
     address public constant MAINNET_FUNCTIONS_ROUTER =
         0x65Dcc24F8ff9e51F10DCc7Ed1e4e2A61e6E14bd6;
+
+    uint256 public constant MAINNET_DON_ID =
+        0x66756e2d657468657265756d2d6d61696e6e65742d3100000000000000000000;
 }

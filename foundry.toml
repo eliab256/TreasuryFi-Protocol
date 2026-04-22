@@ -2,13 +2,14 @@
 src = "src"
 out = "out"
 libs = ["lib"]
-solc = "0.8.34"
 remappings = [
+    "@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/",
+    "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
     "@openzeppelin/=lib/openzeppelin-contracts/",
     "@chainlink/=lib/chainlink-brownie-contracts/contracts/",
     "@t-rex/=lib/T-REX/contracts/",
     "@erc3525/=lib/erc-3525/contracts/",
-    "@onchain-id/solidity/=lib/solidity/contracts/",
+    "@onchain-id/solidity/=lib/solidity/",
     "forge-std/=lib/forge-std/src/"
 ]
 

@@ -1,17 +1,18 @@
 //SPDX-License-Identifier: MIT
-pragma solidity ^0.8.34;
+pragma solidity ^0.8.17;
 
 import {Script} from "forge-std/Script.sol";
 import {CodeConstants} from "./CodeConstants.sol";
-import {Identity} from "@onchain-id/solidity/Identity.sol";
-import {IIdentity} from "@onchain-id/solidity/interface/IIdentity.sol";
+import {Identity} from "@onchain-id/solidity/contracts/Identity.sol";
+import {
+    IIdentity
+} from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import {
     IdentityRegistry
 } from "@t-rex/registry/implementation/IdentityRegistry.sol";
 
 contract RegisterInvestor is Script, CodeConstants {
-    
-    /** 
+    /**
      * @notice Full-flow registration with explicit country code.
      * @param _identityRegistry Address of deployed IdentityRegistry
      * @param _claimIssuer Address of trusted ClaimIssuer

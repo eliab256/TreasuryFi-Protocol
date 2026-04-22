@@ -1,21 +1,24 @@
 //SPDX-License-Identifier: MIT
-pragma solidity ^0.8.34;
+pragma solidity ^0.8.17;
 
 import {
-    IAutomationRegistryConsumer
-} from "@chainlink/src/v0.8/automation/interfaces/IAutomationRegistryConsumer.sol";
+    AutomationCompatibleInterface
+} from "@chainlink/src/v0.8/automation/interfaces/AutomationCompatibleInterface.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
  */
-contract BondAutomation is IAutomationRegistryConsumer, Ownable {
+contract BondAutomation is AutomationCompatibleInterface, Ownable {
     error BondAutomation__ChainlinkForwarderAddressAlreadySet();
     error BondAutomation__ChainlinkUpkeepIdAlreadySet();
     error BondAutomation__OnlyChainlinkAutomationOrOwner();
     error BondAutomation__OnlyChainlinkAutomation();
     error BondAutomation__UpkeepNotNeeded();
 
-    event BondAutomation__ManualUpkeepExecuted(address indexed executor, uint256 indexed timestamp);
+    event BondAutomation__ManualUpkeepExecuted(
+        address indexed executor,
+        uint256 indexed timestamp
+    );
 
     uint256 internal constant GRACE_PERIOD = 6 hours; //@audit-info define a grace period
 
@@ -29,7 +32,21 @@ contract BondAutomation is IAutomationRegistryConsumer, Ownable {
      */
     uint256 private s_upkeepId;
 
-    constructor() Ownable(msg.sender) {}
+    address private s_bondOracle;
+    address private s_functionsConsumer;
+
+    uint256 internal s_interval;
+    uint256 internal s_lastUpkeep;
+
+    constructor(
+        address _bondOracle,
+        address _functionsConsumer,
+        uint256 _interval
+    ) Ownable(msg.sender) {
+        s_bondOracle = _bondOracle;
+        s_functionsConsumer = _functionsConsumer;
+        s_interval = _interval;
+    }
 
     /**
      * @notice Sets the Chainlink Automation forwarder address
@@ -60,12 +77,18 @@ contract BondAutomation is IAutomationRegistryConsumer, Ownable {
         override
         returns (bool upkeepNeeded, bytes memory performData)
     {
-        // @audit-info implement logic to check if upkeep is needed and prepare performData
+        upkeepNeeded = block.timestamp >= (s_lastUpkeep + s_interval);
         return (upkeepNeeded, performData);
     }
 
     function performUpkeep(bytes calldata performData) external override {
-        //bool withinGracePeriod = block.timestamp < (auctionEndTime + GRACE_PERIOD);
+        (bool upkeepNeeded, ) = checkUpkeep(performData);
+        if (!upkeepNeeded) {
+            revert BondAutomation__UpkeepNotNeeded();
+        }
+
+        bool withinGracePeriod = block.timestamp <
+            (s_lastUpkeep + GRACE_PERIOD + s_interval);
 
         if (withinGracePeriod) {
             // During grace period: only Chainlink Automation can call
@@ -85,6 +108,8 @@ contract BondAutomation is IAutomationRegistryConsumer, Ownable {
                 block.timestamp
             );
         }
+
+        s_lastUpkeep = block.timestamp;
 
         // @audit-info implement logic to perform upkeep based on performData
     }
