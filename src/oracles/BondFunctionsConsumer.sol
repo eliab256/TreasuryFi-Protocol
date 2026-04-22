@@ -2,12 +2,11 @@
 pragma solidity ^0.8.17;
 
 import {IBondFunctionsConsumer} from "../interfaces/IBondFunctionsConsumer.sol";
+import {IBondOracle} from "../interfaces/IBondOracle.sol";
 import {
     FunctionsClient
 } from "@chainlink/src/v0.8/functions/v1_3_0/FunctionsClient.sol";
-import {
-    ConfirmedOwner
-} from "@chainlink/src/v0.8/shared/access/ConfirmedOwner.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {
     FunctionsRequest
 } from "@chainlink/src/v0.8/functions/v1_0_0/libraries/FunctionsRequest.sol";
@@ -16,38 +15,24 @@ import {BondYieldsResponse} from "../types.sol";
 contract BondFunctionsConsumer is
     IBondFunctionsConsumer,
     FunctionsClient,
-    ConfirmedOwner
+    Ownable
 {
     using FunctionsRequest for FunctionsRequest.Request;
-
-    // Custom error type
-    error UnexpectedRequestID(bytes32 requestId);
-
-    // Event to log responses
-    event Response(
-        bytes32 indexed requestId,
-        uint64 twoYearYield,
-        uint64 fiveYearYield,
-        uint64 tenYearYield,
-        uint64 thirtyYearYield,
-        uint256 timestamp,
-        bytes response,
-        bytes err
-    );
 
     // Callback gas limit
     uint32 internal immutable i_gasLimit;
     bytes32 internal immutable i_donID;
+    address internal immutable i_bondOracle;
 
     // State variables (all internal)
     bytes32 internal s_lastRequestId;
     bytes internal s_lastResponse;
     bytes internal s_lastError;
-    BondYieldsResponse internal s_bondYieldsResponse;
     uint64 internal s_subscriptionId;
+    address internal s_authorizedCaller; // BondAutomation contract
 
     // JavaScript source code
-    string internal source =
+    string internal constant source =
         'const series=["DGS2","DGS5","DGS10","DGS30"];'
         "const responses=await Promise.all(series.map((id)=>Functions.makeHttpRequest({url:`https://api.stlouisfed.org/fred/series/observations?series_id=${id}&api_key=${secrets.FRED_API_KEY}&file_type=json&sort_order=desc&limit=1`})));"
         "const values=[];"
@@ -64,66 +49,52 @@ contract BondFunctionsConsumer is
         'console.log("timestamp:",timestamp);'
         'return Functions.encodeAbiParameters(["uint64[]","uint256"],[values,timestamp]);';
 
-    // --- Getters ---
-    function getLastRequestId() external view returns (bytes32) {
-        return s_lastRequestId;
-    }
-    function getLastResponse() external view returns (bytes memory) {
-        return s_lastResponse;
-    }
-    function getLastError() external view returns (bytes memory) {
-        return s_lastError;
-    }
-    function getBondYieldsResponse()
-        external
-        view
-        returns (BondYieldsResponse memory)
-    {
-        return s_bondYieldsResponse;
-    }
-    function getSubscriptionId() external view returns (uint64) {
-        return s_subscriptionId;
-    }
-    function getGasLimit() external view returns (uint32) {
-        return i_gasLimit;
-    }
-    function getDonID() external view returns (bytes32) {
-        return i_donID;
-    }
-    function getSource() external view returns (string memory) {
-        return source;
-    }
-
     /**
      * @notice Initializes the contract with the Chainlink router address and sets the contract owner
      */
     constructor(
         address _router,
         bytes32 _donID,
-        uint32 _gasLimit
-    ) FunctionsClient(_router) ConfirmedOwner(msg.sender) {
+        uint32 _gasLimit,
+        address _bondOracle
+    ) FunctionsClient(_router) Ownable(msg.sender) {
+        if (_bondOracle == address(0))
+            revert BondFunctionsConsumer__ZeroAddress();
         i_donID = _donID;
         i_gasLimit = _gasLimit;
+        i_bondOracle = _bondOracle;
+    }
+
+    /// @notice Sets the authorized caller (BondAutomation) — only owner
+    function setAuthorizedCaller(address _caller) external onlyOwner {
+        if (_caller == address(0)) revert BondFunctionsConsumer__ZeroAddress();
+        s_authorizedCaller = _caller;
+        emit AuthorizedCallerSet(_caller);
+    }
+
+    function setSubscriptionId(uint64 _subscriptionId) external onlyOwner {
+        s_subscriptionId = _subscriptionId;
+        emit SubscriptionIdSet(_subscriptionId);
     }
 
     /**
      * @notice Sends an HTTP request for character information
-     * @param subscriptionId The ID for the Chainlink subscription
-     * @param args The arguments to pass to the HTTP request
      * @return requestId The ID of the request
      */
-    function sendRequest(
-        uint64 subscriptionId,
-        string[] calldata args
-    ) external onlyOwner returns (bytes32 requestId) {
+    function sendRequest() external returns (bytes32 requestId) {
+        if (msg.sender != s_authorizedCaller) {
+            revert BondFunctionsConsumer__NotAuthorized();
+        }
+        if (s_subscriptionId == 0) {
+            revert BondFunctionsConsumer__InvalidSubscriptionId();
+        }
         FunctionsRequest.Request memory req;
         req.initializeRequestForInlineJavaScript(source); // Initialize the request with JS code
-        if (args.length > 0) req.setArgs(args); // Set the arguments for the request
 
         // Send the request and store the request ID
         s_lastRequestId = _sendRequest(
             req.encodeCBOR(),
-            subscriptionId,
+            s_subscriptionId,
             i_gasLimit,
             i_donID
         );
@@ -147,30 +118,52 @@ contract BondFunctionsConsumer is
         }
         // Update the contract's state variables with the response and any errors
         s_lastResponse = response;
-        abi.decode(response, (uint64[], uint256));
-        (uint64[] memory values, uint256 timestamp) = abi.decode(
-            response,
-            (uint64[], uint256)
-        );
-        s_bondYieldsResponse = BondYieldsResponse({
-            twoYearYield: values[0],
-            fiveYearYield: values[1],
-            tenYearYield: values[2],
-            thirtyYearYield: values[3],
-            timestamp: timestamp
-        });
         s_lastError = err;
 
+        uint256 timestampResponse = 0;
+
+        if (err.length == 0 && response.length > 0) {
+            (uint64[] memory values, uint256 ts) = abi.decode(
+                response,
+                (uint64[], uint256)
+            );
+            if (values.length < 4)
+                revert BondFunctionsConsumer__IncompleteResponse(values.length);
+            timestampResponse = ts;
+        }
+
+        try IBondOracle(i_bondOracle).updateYield(response, err) {
+            // success
+        } catch (bytes memory oracleErr) {
+            emit OracleUpdateFailed(oracleErr);
+        }
         // Emit an event to log the response
-        emit Response(
-            requestId,
-            s_bondYieldsResponse.twoYearYield,
-            s_bondYieldsResponse.fiveYearYield,
-            s_bondYieldsResponse.tenYearYield,
-            s_bondYieldsResponse.thirtyYearYield,
-            s_bondYieldsResponse.timestamp,
-            s_lastResponse,
-            s_lastError
-        );
+        emit Response(requestId, timestampResponse, response, s_lastError);
+    }
+
+    // --- Getters ---
+    function getLastRequestId() external view returns (bytes32) {
+        return s_lastRequestId;
+    }
+    function getLastResponse() external view returns (bytes memory) {
+        return s_lastResponse;
+    }
+    function getLastError() external view returns (bytes memory) {
+        return s_lastError;
+    }
+    function getSubscriptionId() external view returns (uint64) {
+        return s_subscriptionId;
+    }
+    function getAuthorizedCaller() external view returns (address) {
+        return s_authorizedCaller;
+    }
+    function getGasLimit() external view returns (uint32) {
+        return i_gasLimit;
+    }
+    function getDonID() external view returns (bytes32) {
+        return i_donID;
+    }
+    function getSource() external pure returns (string memory) {
+        return source;
     }
 }

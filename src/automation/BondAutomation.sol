@@ -4,23 +4,15 @@ pragma solidity ^0.8.17;
 import {
     AutomationCompatibleInterface
 } from "@chainlink/src/v0.8/automation/interfaces/AutomationCompatibleInterface.sol";
+import {IBondAutomation} from "../interfaces/IBondAutomation.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {IBondFunctionsConsumer} from "../interfaces/IBondFunctionsConsumer.sol";
 
 /**
  */
-contract BondAutomation is AutomationCompatibleInterface, Ownable {
-    error BondAutomation__ChainlinkForwarderAddressAlreadySet();
-    error BondAutomation__ChainlinkUpkeepIdAlreadySet();
-    error BondAutomation__OnlyChainlinkAutomationOrOwner();
-    error BondAutomation__OnlyChainlinkAutomation();
-    error BondAutomation__UpkeepNotNeeded();
+contract BondAutomation is IBondAutomation, AutomationCompatibleInterface, Ownable {
 
-    event BondAutomation__ManualUpkeepExecuted(
-        address indexed executor,
-        uint256 indexed timestamp
-    );
-
-    uint256 internal constant GRACE_PERIOD = 6 hours; //@audit-info define a grace period
+    uint256 internal constant GRACE_PERIOD = 6 hours; 
 
     /**
      * @dev Interface for the chainlink automation registry
@@ -31,19 +23,15 @@ contract BondAutomation is AutomationCompatibleInterface, Ownable {
      * @dev Upkeep ID for Chainlink Automation
      */
     uint256 private s_upkeepId;
-
-    address private s_bondOracle;
     address private s_functionsConsumer;
 
     uint256 internal s_interval;
     uint256 internal s_lastUpkeep;
 
     constructor(
-        address _bondOracle,
         address _functionsConsumer,
         uint256 _interval
     ) Ownable(msg.sender) {
-        s_bondOracle = _bondOracle;
         s_functionsConsumer = _functionsConsumer;
         s_interval = _interval;
     }
@@ -110,7 +98,6 @@ contract BondAutomation is AutomationCompatibleInterface, Ownable {
         }
 
         s_lastUpkeep = block.timestamp;
-
-        // @audit-info implement logic to perform upkeep based on performData
+        IBondFunctionsConsumer(s_functionsConsumer).sendRequest();
     }
 }

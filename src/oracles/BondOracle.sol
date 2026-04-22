@@ -5,16 +5,7 @@ import {BondYieldsResponse} from "../types.sol";
 import {IBondOracle} from "../interfaces/IBondOracle.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 contract BondOracle is IBondOracle, AccessControl {
-    event YieldUpdated(
-        uint64 twoYearYield,
-        uint64 fiveYearYield,
-        uint64 tenYearYield,
-        uint64 thirtyYearYield,
-        uint256 timestamp
-    );
 
-    error BondOracle__DataIsStale();
-    error BondOracle__InvalidSlot();
 
     uint256 internal constant STALENESS_THRESHOLD = 48 hours;
     bytes32 public constant UPDATER_ROLE = keccak256("UPDATER_ROLE");
@@ -29,15 +20,30 @@ contract BondOracle is IBondOracle, AccessControl {
     }
 
     function updateYield(
-        BondYieldsResponse memory newYields
+        bytes memory response,
+        bytes memory err
     ) external onlyRole(UPDATER_ROLE) {
-        s_bondYieldsResponse = newYields;
+        if (err.length > 0) {
+            emit YieldUpdateFailed( err);
+            return;
+        }
+        (uint64[] memory values, uint256 timestamp) = abi.decode(
+            response,
+            (uint64[], uint256)
+        );
+        s_bondYieldsResponse = BondYieldsResponse({
+            twoYearYield: values[0],
+            fiveYearYield: values[1],
+            tenYearYield: values[2],
+            thirtyYearYield: values[3],
+            timestamp: timestamp
+        });
         emit YieldUpdated(
-            newYields.twoYearYield,
-            newYields.fiveYearYield,
-            newYields.tenYearYield,
-            newYields.thirtyYearYield,
-            newYields.timestamp
+            s_bondYieldsResponse.twoYearYield,
+            s_bondYieldsResponse.fiveYearYield,
+            s_bondYieldsResponse.tenYearYield,
+            s_bondYieldsResponse.thirtyYearYield,
+            s_bondYieldsResponse.timestamp
         );
     }
 
