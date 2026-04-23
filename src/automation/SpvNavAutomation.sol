@@ -1,16 +1,18 @@
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.17;
 
-import {IBondAutomation} from "../interfaces/IBondAutomation.sol";
+import {ISpvNavAutomation} from "../interfaces/ISpvNavAutomation.sol";
 import {BaseAutomation} from "./BaseAutomation.sol";
-import {IBondFunctionsConsumer} from "../interfaces/IBondFunctionsConsumer.sol";
+import {
+    ISpvNavFunctionsConsumer
+} from "../interfaces/ISpvNavFunctionsConsumer.sol";
 
 /**
- * @title BondAutomation
- * @notice Chainlink Automation contract for triggering Bond yield updates.
+ * @title SpvNavAutomation
+ * @notice Chainlink Automation contract for triggering SPV NAV updates.
  * Inherits common upkeep logic from BaseAutomation.
  */
-contract BondAutomation is IBondAutomation, BaseAutomation {
+contract SpvNavAutomation is ISpvNavAutomation, BaseAutomation {
     address private s_functionsConsumer;
 
     constructor(
@@ -19,15 +21,15 @@ contract BondAutomation is IBondAutomation, BaseAutomation {
         uint256 _interval
     ) BaseAutomation(initialAdmin, _interval) {
         if (_functionsConsumer == address(0))
-            revert BondAutomation__ZeroAddress();
+            revert SpvNavAutomation__ZeroAddress();
         s_functionsConsumer = _functionsConsumer;
     }
 
     /**
-     * @notice Internal hook to trigger Bond yield update request
+     * @notice Internal hook to trigger SPV NAV update request
      */
     function _triggerRequest() internal override {
-        IBondFunctionsConsumer(s_functionsConsumer).sendRequest();
+        ISpvNavFunctionsConsumer(s_functionsConsumer).sendRequest();
     }
 
     // --- Getters ---
@@ -35,6 +37,3 @@ contract BondAutomation is IBondAutomation, BaseAutomation {
         return s_functionsConsumer;
     }
 }
-
-// Errors (defined for interface compatibility)
-error BondAutomation__ZeroAddress();

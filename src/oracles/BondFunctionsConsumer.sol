@@ -66,6 +66,7 @@ contract BondFunctionsConsumer is
     }
 
     /// @notice Sets the authorized caller (BondAutomation) — only owner
+    // @audit-issue usare access control
     function setAuthorizedCaller(address _caller) external onlyOwner {
         if (_caller == address(0)) revert BondFunctionsConsumer__ZeroAddress();
         s_authorizedCaller = _caller;
@@ -114,7 +115,7 @@ contract BondFunctionsConsumer is
         bytes memory err
     ) internal override {
         if (s_lastRequestId != requestId) {
-            revert UnexpectedRequestID(requestId); // Check if request IDs match
+            revert BondFunctionsConsumer__UnexpectedRequestID(requestId); // Check if request IDs match
         }
         // Update the contract's state variables with the response and any errors
         s_lastResponse = response;
@@ -138,7 +139,7 @@ contract BondFunctionsConsumer is
             emit OracleUpdateFailed(oracleErr);
         }
         // Emit an event to log the response
-        emit Response(requestId, timestampResponse, response, s_lastError);
+        emit Response(requestId, timestampResponse, response, err);
     }
 
     // --- Getters ---

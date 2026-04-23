@@ -3,9 +3,9 @@ pragma solidity ^0.8.17;
 
 import {IBaseAutomation} from "./IBaseAutomation.sol";
 
-interface IBondAutomation  {
+interface ISpvNavAutomation {
     // --- Errors ---
-    error BondAutomation__ZeroAddress();
+    error SpvNavAutomation__ZeroAddress();
 
     // --- Getters ---
     function getFunctionsConsumer() external view returns (address);

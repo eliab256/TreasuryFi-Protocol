@@ -1,13 +1,13 @@
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.17;
 
-interface IBondFunctionsConsumer {
+interface ISpvNavFunctionsConsumer {
     // Errors
-    error BondFunctionsConsumer__UnexpectedRequestID(bytes32 requestId);
-    error BondFunctionsConsumer__NotAuthorized();
-    error BondFunctionsConsumer__InvalidSubscriptionId();
-    error BondFunctionsConsumer__ZeroAddress();
-    error BondFunctionsConsumer__IncompleteResponse(uint256 length);
+    error SpvNavFunctionsConsumer__UnexpectedRequestID(bytes32 requestId);
+    error SpvNavFunctionsConsumer__NotAuthorized();
+    error SpvNavFunctionsConsumer__InvalidSubscriptionId();
+    error SpvNavFunctionsConsumer__ZeroAddress();
+    error SpvNavFunctionsConsumer__IncompleteResponse(uint256 length);
 
     // Events
     event AuthorizedCallerSet(address indexed caller);
@@ -20,8 +20,7 @@ interface IBondFunctionsConsumer {
         bytes err
     );
 
-    // Setters (onlyOwner)
-    function setAuthorizedCaller(address caller) external;
+    // Setters 
     function setSubscriptionId(uint64 subscriptionId) external;
 
     // Actions
@@ -36,4 +35,5 @@ interface IBondFunctionsConsumer {
     function getDonID() external view returns (bytes32);
     function getSource() external view returns (string memory);
     function getAuthorizedCaller() external view returns (address);
+    function getSpvNavOracle() external view returns (address);
 }
