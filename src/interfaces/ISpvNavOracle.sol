@@ -28,4 +28,5 @@ interface ISpvNavOracle {
     function getLastUpdatedTimestamp() external view returns (uint256);
     function getFunctionsConsumer() external view returns (address);
     function getSpvSigner() external view returns (address);
+    function getDecimals() external view returns (uint8);
 }

@@ -1,6 +1,7 @@
 const url = "https://your-spv.vercel.app/api/nav";
 
 const response = await Functions.makeHttpRequest({ url });
+const decimals = 8;
 
 if (response.error) {
   throw Error("SPV fetch failed");
@@ -17,12 +18,12 @@ return Functions.encodeAbi(
   ["uint256[4]", "uint256", "bytes", "bytes32"],
   [
     [
-      data.nav_by_bucket["2Y"],
-      data.nav_by_bucket["5Y"],
-      data.nav_by_bucket["10Y"],
-      data.nav_by_bucket["30Y"]
+        Math.round(data.nav_by_bucket["2Y"]  * 10 ** decimals),
+        Math.round(data.nav_by_bucket["5Y"]  * 10 ** decimals),
+        Math.round(data.nav_by_bucket["10Y"] * 10 ** decimals),
+        Math.round(data.nav_by_bucket["30Y"] * 10 ** decimals),
     ],
-    data.timestamp,
+    Math.floor(data.timestamp / 1000),
     signature,
     hash
   ]

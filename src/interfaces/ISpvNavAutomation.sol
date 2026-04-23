@@ -9,4 +9,5 @@ interface ISpvNavAutomation {
 
     // --- Getters ---
     function getFunctionsConsumer() external view returns (address);
+
 }

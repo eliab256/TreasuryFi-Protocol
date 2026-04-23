@@ -10,11 +10,13 @@ contract SpvNavOracle is ISpvNavOracle, AccessControl {
     using ECDSA for bytes32;
 
     uint256 internal constant STALENESS_THRESHOLD = 48 hours;
+    uint8 internal constant DECIMALS = 8;
     bytes32 public constant UPDATER_ROLE = keccak256("UPDATER_ROLE");
 
     SpvNavsResponse internal s_spvNavsResponse;
     address internal s_functionsConsumer;
     address internal s_spvSigner;
+    uint8 internal s_decimals;
 
     constructor(address _functionsConsumer, address _spvSigner) {
         if (_functionsConsumer == address(0) || _spvSigner == address(0))
@@ -81,6 +83,10 @@ contract SpvNavOracle is ISpvNavOracle, AccessControl {
 
     function _isStale(uint256 _timestamp) internal view returns (bool) {
         return (block.timestamp - _timestamp) > STALENESS_THRESHOLD;
+    }
+
+    function getDecimals() public pure returns (uint8) {
+        return DECIMALS;
     }
 
     function getLastUpdatedTimestamp() public view returns (uint256) {
