@@ -1,11 +1,15 @@
 //SPDX-License-Identifier: MIT
-pragma solidity ^0.8.17;
+pragma solidity ^0.8.0;
 
 import {
     AutomationCompatibleInterface
-} from "@chainlink/src/v0.8/automation/interfaces/AutomationCompatibleInterface.sol";
+} from "@chainlink/contracts/src/v0.8/automation/interfaces/AutomationCompatibleInterface.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 
+/**
+ * @title IBaseAutomation
+ * @notice Interface for the BaseAutomation contract, defining common functions and events for Chainlink Automation contracts.
+ */
 interface IBaseAutomation is AutomationCompatibleInterface, IAccessControl {
     // --- Roles ---
     function AUTOMATION_ADMIN_ROLE() external view returns (bytes32);

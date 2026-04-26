@@ -1,5 +1,5 @@
 //SPDX-License-Identifier: MIT
-pragma solidity ^0.8.17;
+pragma solidity ^0.8.0;
 
 import {IBondAutomation} from "../interfaces/IBondAutomation.sol";
 import {BaseAutomation} from "./BaseAutomation.sol";

@@ -1,5 +1,5 @@
 //SPDX-License-Identifier: MIT
-pragma solidity ^0.8.17;
+pragma solidity ^0.8.0;
 
 struct BondYieldsResponse {
     uint64 twoYearYield;
@@ -9,7 +9,7 @@ struct BondYieldsResponse {
     uint256 timestamp;
 }
 
-struct SpvNavsResponse {
+struct ReservesResponse {
     uint256 twoYearNav;
     uint256 fiveYearNav;
     uint256 tenYearNav;

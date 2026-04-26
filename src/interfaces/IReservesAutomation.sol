@@ -1,11 +1,11 @@
 //SPDX-License-Identifier: MIT
-pragma solidity ^0.8.17;
+pragma solidity ^0.8.0;
 
 import {IBaseAutomation} from "./IBaseAutomation.sol";
 
-interface ISpvNavAutomation {
+interface IReservesAutomation {
     // --- Errors ---
-    error SpvNavAutomation__ZeroAddress();
+    error ReservesAutomation__ZeroAddress();
 
     // --- Getters ---
     function getFunctionsConsumer() external view returns (address);

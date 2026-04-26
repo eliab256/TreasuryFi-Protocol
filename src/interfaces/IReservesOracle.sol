@@ -1,13 +1,13 @@
 //SPDX-License-Identifier: MIT
-pragma solidity ^0.8.17;
+pragma solidity ^0.8.0;
 
-interface ISpvNavOracle {
+interface IReservesOracle {
     // Errors
-    error SpvNavOracle__ZeroAddress();
-    error SpvNavOracle__DataIsStale();
-    error SpvNavOracle__InvalidSlot();
-    error SpvNavOracle__IncompleteResponse(uint256 length);
-    error SpvNavOracle__InvalidSignature(address recovered);
+    error ReservesOracle__ZeroAddress();
+    error ReservesOracle__DataIsStale();
+    error ReservesOracle__InvalidSlot();
+    error ReservesOracle__IncompleteResponse(uint256 length);
+    error ReservesOracle__InvalidSignature(address recovered);
 
     // Events
     event NavUpdated(
@@ -27,6 +27,6 @@ interface ISpvNavOracle {
     function isStale() external view returns (bool);
     function getLastUpdatedTimestamp() external view returns (uint256);
     function getFunctionsConsumer() external view returns (address);
-    function getSpvSigner() external view returns (address);
+    function getReservesSigner() external view returns (address);
     function getDecimals() external view returns (uint8);
 }

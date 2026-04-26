@@ -1,15 +1,15 @@
 //SPDX-License-Identifier: MIT
-pragma solidity ^0.8.17;
+pragma solidity ^0.8.0;
 
 import {IBondFunctionsConsumer} from "../interfaces/IBondFunctionsConsumer.sol";
 import {IBondOracle} from "../interfaces/IBondOracle.sol";
 import {
     FunctionsClient
-} from "@chainlink/src/v0.8/functions/v1_3_0/FunctionsClient.sol";
+} from "@chainlink/contracts/src/v0.8/functions/v1_3_0/FunctionsClient.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {
     FunctionsRequest
-} from "@chainlink/src/v0.8/functions/v1_0_0/libraries/FunctionsRequest.sol";
+} from "@chainlink/contracts/src/v0.8/functions/v1_0_0/libraries/FunctionsRequest.sol";
 import {BondYieldsResponse} from "../types.sol";
 
 contract BondFunctionsConsumer is
@@ -57,7 +57,7 @@ contract BondFunctionsConsumer is
         bytes32 _donID,
         uint32 _gasLimit,
         address _bondOracle
-    ) FunctionsClient(_router) Ownable(msg.sender) {
+    ) FunctionsClient(_router) Ownable() {
         if (_bondOracle == address(0))
             revert BondFunctionsConsumer__ZeroAddress();
         i_donID = _donID;

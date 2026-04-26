@@ -1,22 +1,23 @@
 //SPDX-License-Identifier: MIT
-pragma solidity ^0.8.17;
+pragma solidity ^0.8.0;
 
 import {BondYieldsResponse} from "../types.sol";
 import {IBondOracle} from "../interfaces/IBondOracle.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
-contract BondOracle is IBondOracle, AccessControl {
+import "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import "@openzeppelin/contracts/utils/introspection/ERC165.sol";
 
-
+contract BondOracle is IBondOracle, ERC165, AccessControl {
     uint256 internal constant STALENESS_THRESHOLD = 48 hours;
     bytes32 public constant UPDATER_ROLE = keccak256("UPDATER_ROLE");
 
     BondYieldsResponse internal s_bondYieldsResponse;
-    address internal s_FunctionsConsumer;
+    address internal s_functionsConsumer;
 
     constructor(address _functionsConsumer) {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(UPDATER_ROLE, _functionsConsumer);
-        s_FunctionsConsumer = _functionsConsumer;
+        s_functionsConsumer = _functionsConsumer;
     }
 
     function updateYield(
@@ -24,7 +25,7 @@ contract BondOracle is IBondOracle, AccessControl {
         bytes memory err
     ) external onlyRole(UPDATER_ROLE) {
         if (err.length > 0) {
-            emit YieldUpdateFailed( err);
+            emit YieldUpdateFailed(err);
             return;
         }
         (uint64[] memory values, uint256 timestamp) = abi.decode(
@@ -72,6 +73,14 @@ contract BondOracle is IBondOracle, AccessControl {
     }
 
     function getFunctionsConsumer() public view returns (address) {
-        return s_FunctionsConsumer;
+        return s_functionsConsumer;
+    }
+
+    function supportsInterface(
+        bytes4 interfaceId
+    ) public view virtual override(AccessControl, ERC165) returns (bool) {
+        return
+            interfaceId == type(IBondOracle).interfaceId ||
+            super.supportsInterface(interfaceId);
     }
 }

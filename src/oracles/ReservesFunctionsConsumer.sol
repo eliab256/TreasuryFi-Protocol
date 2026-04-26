@@ -1,20 +1,20 @@
 //SPDX-License-Identifier: MIT
-pragma solidity ^0.8.17;
+pragma solidity ^0.8.0;
 
 import {
-    ISpvNavFunctionsConsumer
-} from "../interfaces/ISpvNavFunctionsConsumer.sol";
-import {ISpvNavOracle} from "../interfaces/ISpvNavOracle.sol";
+    IReservesFunctionsConsumer
+} from "../interfaces/IReservesFunctionsConsumer.sol";
+import {IReservesOracle} from "../interfaces/IReservesOracle.sol";
 import {
     FunctionsClient
-} from "@chainlink/src/v0.8/functions/v1_3_0/FunctionsClient.sol";
+} from "@chainlink/contracts/src/v0.8/functions/v1_3_0/FunctionsClient.sol";
 import {
     FunctionsRequest
-} from "@chainlink/src/v0.8/functions/v1_0_0/libraries/FunctionsRequest.sol";
+} from "@chainlink/contracts/src/v0.8/functions/v1_0_0/libraries/FunctionsRequest.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 
-contract SpvNavFunctionsConsumer is
-    ISpvNavFunctionsConsumer,
+contract ReservesFunctionsConsumer is
+    IReservesFunctionsConsumer,
     FunctionsClient,
     AccessControl
 {
@@ -23,7 +23,7 @@ contract SpvNavFunctionsConsumer is
     bytes32 public constant UPDATER_ROLE = keccak256("UPDATER_ROLE");
     uint32 internal immutable i_gasLimit;
     bytes32 internal immutable i_donID;
-    address internal immutable i_spvNavOracle;
+    address internal immutable i_reservesOracle;
 
     bytes32 internal s_lastRequestId;
     bytes internal s_lastResponse;
@@ -62,13 +62,13 @@ contract SpvNavFunctionsConsumer is
         address _router,
         bytes32 _donID,
         uint32 _gasLimit,
-        address _spvNavOracle
+        address _reservesOracle
     ) FunctionsClient(_router)  {
-        if (_spvNavOracle == address(0))
-            revert SpvNavFunctionsConsumer__ZeroAddress();
+        if (_reservesOracle == address(0))
+            revert ReservesFunctionsConsumer__ZeroAddress();
         i_donID = _donID;
         i_gasLimit = _gasLimit;
-        i_spvNavOracle = _spvNavOracle;
+        i_reservesOracle = _reservesOracle;
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(UPDATER_ROLE, msg.sender);
     }
@@ -80,7 +80,7 @@ contract SpvNavFunctionsConsumer is
 
     function sendRequest() external onlyRole(UPDATER_ROLE) returns (bytes32 requestId) {
         if (s_subscriptionId == 0)
-            revert SpvNavFunctionsConsumer__InvalidSubscriptionId();
+            revert ReservesFunctionsConsumer__InvalidSubscriptionId();
 
         FunctionsRequest.Request memory req;
         req.initializeRequestForInlineJavaScript(source);
@@ -101,7 +101,7 @@ contract SpvNavFunctionsConsumer is
         bytes memory err
     ) internal override {
         if (s_lastRequestId != requestId)
-            revert SpvNavFunctionsConsumer__UnexpectedRequestID(requestId);
+            revert ReservesFunctionsConsumer__UnexpectedRequestID(requestId);
 
         s_lastResponse = response;
         s_lastError = err;
@@ -114,11 +114,11 @@ contract SpvNavFunctionsConsumer is
                 (uint256[4], uint256, bytes, bytes32)
             );
             if (navs.length < 4)
-                revert SpvNavFunctionsConsumer__IncompleteResponse(navs.length);
+                revert ReservesFunctionsConsumer__IncompleteResponse(navs.length);
             timestampResponse = ts;
         }
 
-        try ISpvNavOracle(i_spvNavOracle).updateNav(response, err) {
+        try IReservesOracle(i_reservesOracle).updateNav(response, err) {
             // success
         } catch (bytes memory oracleErr) {
             emit OracleUpdateFailed(oracleErr);
@@ -151,7 +151,7 @@ contract SpvNavFunctionsConsumer is
     function getSource() external pure returns (string memory) {
         return source;
     }
-    function getSpvNavOracle() external view returns (address) {
-        return i_spvNavOracle;
+    function getReservesOracle() external view returns (address) {
+        return i_reservesOracle;
     }
 }

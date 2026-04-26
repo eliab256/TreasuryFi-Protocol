@@ -1,21 +1,21 @@
 [submodule "lib/forge-std"]
 	path = lib/forge-std
 	url = https://github.com/foundry-rs/forge-std
-[submodule "lib/openzeppelin-contracts"]
-	path = lib/openzeppelin-contracts
-	url = https://github.com/OpenZeppelin/openzeppelin-contracts
 [submodule "lib/T-REX"]
 	path = lib/T-REX
 	url = https://github.com/TokenySolutions/T-REX
 [submodule "lib/erc-3525"]
 	path = lib/erc-3525
 	url = https://github.com/solv-finance/erc-3525
-[submodule "lib/chainlink-brownie-contracts"]
-	path = lib/chainlink-brownie-contracts
-	url = https://github.com/smartcontractkit/chainlink-brownie-contracts
 [submodule "lib/solidity"]
 	path = lib/solidity
 	url = https://github.com/onchain-id/solidity
+[submodule "lib/chainlink-evm"]
+	path = lib/chainlink-evm
+	url = https://github.com/smartcontractkit/chainlink-evm
+[submodule "lib/openzeppelin-contracts"]
+	path = lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts
 [submodule "lib/openzeppelin-contracts-upgradeable"]
 	path = lib/openzeppelin-contracts-upgradeable
-	url = https://github.com/openzeppelin/openzeppelin-contracts-upgradeable
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts-upgradeable

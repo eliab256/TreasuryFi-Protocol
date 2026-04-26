@@ -835,7 +835,7 @@ The project is complete. Anyone can clone the repo, read the README, and immedia
            └──────────┬───────────────────────┘
                       ▼
            ┌──────────────────────────┐
-           │  TRACK C — Token          │
+           │  TRACK C — Token         │
            │                          │
            │  TASK 5.1  Study 3525    │
            │  TASK 5.2  Base token    │

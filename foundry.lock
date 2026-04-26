@@ -5,10 +5,10 @@
       "rev": "a09cfd38aa257d56db7ff9c90f30e65f125a141b"
     }
   },
-  "lib/chainlink-brownie-contracts": {
+  "lib/chainlink-evm": {
     "tag": {
-      "name": "1.3.0",
-      "rev": "5cb41fbc9b525338b6098da5ea7dd0b7e92f89e4"
+      "name": "v0.3.3",
+      "rev": "793106cd598da8b2762958880300787b0b361fa1"
     }
   },
   "lib/erc-3525": {
@@ -25,8 +25,8 @@
   },
   "lib/openzeppelin-contracts": {
     "tag": {
-      "name": "v5.6.1",
-      "rev": "5fd1781b1454fd1ef8e722282f86f9293cacf256"
+      "name": "v4.9.6",
+      "rev": "dc44c9f1a4c3b10af99492eed84f83ed244203f6"
     }
   },
   "lib/openzeppelin-contracts-upgradeable": {

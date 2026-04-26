@@ -1,18 +1,19 @@
 //SPDX-License-Identifier: MIT
-pragma solidity ^0.8.17;
+pragma solidity ^0.8.0;
 
-import {ISpvNavAutomation} from "../interfaces/ISpvNavAutomation.sol";
+import {IReservesAutomation} from "../interfaces/IReservesAutomation.sol";
 import {BaseAutomation} from "./BaseAutomation.sol";
 import {
-    ISpvNavFunctionsConsumer
-} from "../interfaces/ISpvNavFunctionsConsumer.sol";
+    IReservesFunctionsConsumer
+} from "../interfaces/IReservesFunctionsConsumer.sol";
 
 /**
- * @title SpvNavAutomation
- * @notice Chainlink Automation contract for triggering SPV NAV updates.
+ * @title ReservesAutomation
+ * @notice Chainlink Automation contract for triggering Reserves NAV updates.
  * Inherits common upkeep logic from BaseAutomation.
  */
-contract SpvNavAutomation is ISpvNavAutomation, BaseAutomation {
+contract ReservesAutomation is IReservesAutomation, BaseAutomation {
+    
     address private s_functionsConsumer;
 
     constructor(
@@ -21,15 +22,15 @@ contract SpvNavAutomation is ISpvNavAutomation, BaseAutomation {
         uint256 _interval
     ) BaseAutomation(initialAdmin, _interval) {
         if (_functionsConsumer == address(0))
-            revert SpvNavAutomation__ZeroAddress();
+            revert ReservesAutomation__ZeroAddress();
         s_functionsConsumer = _functionsConsumer;
     }
 
     /**
-     * @notice Internal hook to trigger SPV NAV update request
+     * @notice Internal hook to trigger Reserves NAV update request
      */
     function _triggerRequest() internal override {
-        ISpvNavFunctionsConsumer(s_functionsConsumer).sendRequest();
+        IReservesFunctionsConsumer(s_functionsConsumer).sendRequest();
     }
 
     // --- Getters ---

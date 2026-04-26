@@ -1,13 +1,13 @@
 //SPDX-License-Identifier: MIT
-pragma solidity ^0.8.17;
+pragma solidity ^0.8.0;
 
-interface ISpvNavFunctionsConsumer {
+interface IReservesFunctionsConsumer {
     // Errors
-    error SpvNavFunctionsConsumer__UnexpectedRequestID(bytes32 requestId);
-    error SpvNavFunctionsConsumer__NotAuthorized();
-    error SpvNavFunctionsConsumer__InvalidSubscriptionId();
-    error SpvNavFunctionsConsumer__ZeroAddress();
-    error SpvNavFunctionsConsumer__IncompleteResponse(uint256 length);
+    error ReservesFunctionsConsumer__UnexpectedRequestID(bytes32 requestId);
+    error ReservesFunctionsConsumer__NotAuthorized();
+    error ReservesFunctionsConsumer__InvalidSubscriptionId();
+    error ReservesFunctionsConsumer__ZeroAddress();
+    error ReservesFunctionsConsumer__IncompleteResponse(uint256 length);
 
     // Events
     event AuthorizedCallerSet(address indexed caller);
@@ -35,5 +35,5 @@ interface ISpvNavFunctionsConsumer {
     function getDonID() external view returns (bytes32);
     function getSource() external view returns (string memory);
     function getAuthorizedCaller() external view returns (address);
-    function getSpvNavOracle() external view returns (address);
+    function getReservesOracle() external view returns (address);
 }
