@@ -7,12 +7,16 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {
     IERC20Metadata
 } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import { AggregatorV3Interface } from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
+import {
+    AggregatorV3Interface
+} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import {
     IIdentityRegistry
 } from "@t-rex/registry/interface/IIdentityRegistry.sol";
 import {IBondOracle} from "../interfaces/IBondOracle.sol";
 import {IReservesOracle} from "../interfaces/IReservesOracle.sol";
+import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import {PositionData} from "../types.sol";
 
 /**
  * @title TreasuryBondToken
@@ -22,17 +26,25 @@ import {IReservesOracle} from "../interfaces/IReservesOracle.sol";
  * The contract includes role-based access control for fee management and administrative functions.
  */
 contract TreasuryBondToken is ERC3525, AccessControl {
+
     event IdentityRegistryAdded(address indexed identityRegistry);
+    event AddressFrozen(address indexed wallet, bool indexed frozen, address indexed owner);
+    event TokensFrozen(address indexed user, uint256 amount);
+    event TokensUnfrozen(address indexed user, uint256 amount);
 
     error TreasuryBondToken__InvalidSlot();
     error TreasuryBondToken__FunctionDisabled();
     error TreasuryBondToken__NotApprovedOrOwner();
     error TreasuryBondToken__EtherNotAccepted();
     error TreasuryBondToken__InvalidValue();
-    error TreasuryBondToken__InvalidName();
-    error TreasuryBondToken__InvalidSymbol();
-    error TreasuryBondToken__InvalidDecimals();
     error TreasuryBondToken__ZeroAddress();
+    error TreasuryBondToken__InvalidOracle(address oracle, bytes4 interfaceId);
+    error TreasuryBondToken__SenderNotVerified();
+    error TreasuryBondToken__ReceiverNotVerified();
+    error TreasuryBondToken__WalletAlreadyFrozen();
+    error TreasuryBondToken__WalletNotFrozen();
+    error TreasuryBondToken__AmountExceedsAvailableBalance();
+    error TreasuryBondToken__AmountShouldBeLessOrEqualToFrozen();
 
     uint256 public constant SLOT_2Y = 1; // 2-Year Treasury exposure
     uint256 public constant SLOT_5Y = 2; // 5-Year Treasury exposure
@@ -56,9 +68,13 @@ contract TreasuryBondToken is ERC3525, AccessControl {
     IIdentityRegistry private s_tokenIdentityRegistry;
 
     mapping(uint256 => uint256) private s_totalValuePerSlot;
+    mapping(uint256 => PositionData) private s_fromIdToPositionData;
+    mapping(address => bool) private s_frozenWallets;
+    mapping(address => uint256) internal s_frozenTokens;
     uint256 private s_totalFeesCollected;
 
     bytes32 public constant FEES_MANAGER_ROLE = keccak256("FEES_MANAGER_ROLE");
+    bytes32 public constant OWNER_ROLE = keccak256("OWNER_ROLE");
 
     modifier onlyValidSlot(uint256 slot) {
         _onlyValidSlot(slot);
@@ -82,21 +98,34 @@ contract TreasuryBondToken is ERC3525, AccessControl {
         address _feesCollector
     ) ERC3525(_name, _symbol, _decimals) {
         // Checks
-        if (bytes(_name).length == 0) revert TreasuryBondToken__InvalidName();
-        if (bytes(_symbol).length == 0)
-            revert TreasuryBondToken__InvalidSymbol();
-        if (_decimals == 0 || _decimals > 18)
-            revert TreasuryBondToken__InvalidDecimals();
         if (
             _usdcAddress == address(0) ||
             _usdcPriceFeedAddress == address(0) ||
-            _identityRegistry == address(0) ||
-            _reservesOracle == address(0) ||
-            _bondOracle == address(0) ||
             _feesCollector == address(0)
         ) revert TreasuryBondToken__ZeroAddress();
 
+        // ERC165 interface checks
+        bytes4 bondOracleInterfaceId = type(IBondOracle).interfaceId;
+        if (!IERC165(_bondOracle).supportsInterface(bondOracleInterfaceId)) {
+            revert TreasuryBondToken__InvalidOracle(
+                _bondOracle,
+                bondOracleInterfaceId
+            );
+        }
+        bytes4 reservesOracleInterfaceId = type(IReservesOracle).interfaceId;
+        if (
+            !IERC165(_reservesOracle).supportsInterface(
+                reservesOracleInterfaceId
+            )
+        ) {
+            revert TreasuryBondToken__InvalidOracle(
+                _reservesOracle,
+                reservesOracleInterfaceId
+            );
+        }
+
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(OWNER_ROLE, msg.sender);
         _grantRole(FEES_MANAGER_ROLE, _feesCollector);
         i_usdc = IERC20(_usdcAddress);
         i_usdcPriceFeed = AggregatorV3Interface(_usdcPriceFeedAddress);
@@ -108,18 +137,13 @@ contract TreasuryBondToken is ERC3525, AccessControl {
         setIdentityRegistry(_identityRegistry);
     }
 
-    function setIdentityRegistry(
-        address _identityRegistry
-    ) public onlyRole(DEFAULT_ADMIN_ROLE) {
-        s_tokenIdentityRegistry = IIdentityRegistry(_identityRegistry);
-        emit IdentityRegistryAdded(_identityRegistry);
-    }
-
     function supportsInterface(
         bytes4 interfaceId
     ) public view override(ERC3525, AccessControl) returns (bool) {
         return super.supportsInterface(interfaceId);
     }
+
+   
 
     function openNewPosition(
         address _mintTo,
@@ -137,7 +161,8 @@ contract TreasuryBondToken is ERC3525, AccessControl {
         // 3. _beforeValueTransfer hook to update internal accounting
         // update total value for the slot
         // 4. _mint the ERC-3525 token to the user with the specified slot
-        // 5. _afterValueTransfer hook to update internal accounting
+        // 5. Update positionData struct
+        // 6. _afterValueTransfer hook to update internal accounting
     }
 
     function closePosition(uint256 _tokenId) public {
@@ -152,7 +177,7 @@ contract TreasuryBondToken is ERC3525, AccessControl {
         // 3. TransferFrom this contract to caller the USDC value of the burned token
         // update total value for the slot
         // 4. Burn the specified ERC-3525 token
-        ERC3525._burn(_tokenId);
+        _burn(_tokenId);
         // 5. _afterValueTransfer hook to update internal accounting
     }
 
@@ -171,8 +196,14 @@ contract TreasuryBondToken is ERC3525, AccessControl {
         // 3. TransferFrom this contract to caller the USDC value of the burned portion of the token
         // 4. Burn the specified value from the ERC-3525 token
         // update total value for the slot
-        ERC3525._burnValue(_tokenId, _valueToBurn);
+        _burnValue(_tokenId, _valueToBurn);
         // 5. _afterValueTransfer hook to update internal accounting
+    }
+
+    function forceTransfer() onlyRole(OWNER_ROLE) public {
+        // @audit-issue implement forceTransfer function
+        // questa funzione permette al protocol owner di forzare il trasferimento di un token da un wallet all' altro in caso di furto o smarrimento
+        // implementare checks per evitare abusi (es. solo wallet frozen, solo una volta ogni tot tempo, etc.)
     }
 
     /**
@@ -234,18 +265,19 @@ contract TreasuryBondToken is ERC3525, AccessControl {
         _claimYield(_tokenId);
     }
 
-    function _mint(
-        address mintTo_,
-        uint256 tokenId_,
-        uint256 slot_,
-        uint256 value_
-    ) internal override {
-        // aggiornare l' accounting del tot value per slot prima di mintare
-        // @audit-info questo aggiornamento va fatto dentro _beforeValueTransfer o _afterValueTransfer? va valutato se è necessario distinguere tra mint, burn e transfer
-        super._mint(mintTo_, tokenId_, slot_, value_);
-    }
 
-    function _claimYield(uint256 _tokenId) internal {
+        function _mint(
+            address _mintTo,
+            uint256 _tokenId,
+            uint256 _slot,
+            uint256 _value
+        ) internal override {
+            // aggiornare l' accounting del tot value per slot prima di mintare
+            // @audit-info questo aggiornamento va fatto dentro _beforeValueTransfer o _afterValueTransfer? va valutato se è necessario distinguere tra mint, burn e transfer
+            super._mint(_mintTo, _tokenId, _slot, _value);
+        }
+
+        function _claimYield(uint256 _tokenId) internal {
         // 1. Recupera lo slot, il valore del token e calcola gli interessi maturati in base al tempo trascorso
         // 2. Trasferisci gli interessi maturati in USDC al possessore del token
         // si può usare la func public che avrà un intervallo di tempo minimo tra due claim per evitare abusi
@@ -254,38 +286,100 @@ contract TreasuryBondToken is ERC3525, AccessControl {
     }
 
     function _beforeValueTransfer(
-        address from_,
-        address to_,
-        uint256 fromTokenId_,
-        uint256 toTokenId_,
-        uint256 slot_,
-        uint256 value_
+        address _from,
+        address _to,
+        uint256 _fromTokenId,
+        uint256 _toTokenId,
+        uint256 _slot,
+        uint256 _value
     ) internal override {
-        // se mint skip compliance sul sender
-        // se burn skip compliance sul receiver
-        // se transfer compliance su entrambi
+        if (_from == address(0)) {
+            _beforeMint(_to, _toTokenId, _slot, _value);
+        } else if (_to == address(0)) {
+            _beforeBurn(_from, _fromTokenId, _slot, _value);
+        } else {
+            _beforeTransfer(_from, _to, _fromTokenId, _toTokenId, _slot, _value);
+        }
+    }
+
+    function _beforeMint(
+        address _to,
+        uint256 _toTokenId,
+        uint256 _slot,
+        uint256 _value
+    ) internal {
+        // 1. Checks on receiver compliance with T-REX
+        if(s_frozenWallets[_to]){
+            revert TreasuryBondToken__ReceiverFrozen();
+        }
+        if(s_tokenIdentityRegistry.isVerified(_to) == false){
+            revert TreasuryBondToken__ReceiverNotVerified();
+        }
+
+        // 2. Checks Reserves oracle
+        // aggiornare l' accounting del tot value per slot prima di mintare
+    }
+
+    function _beforeBurn(
+        address _from,
+        uint256 _fromTokenId,
+        uint256 _slot,
+        uint256 _value
+    ) internal {
+        if(s_frozenWallets[_from]){
+            revert TreasuryBondToken__SenderFrozen();
+        }
+        if(s_tokenIdentityRegistry.isVerified(_to) == false){
+            revert TreasuryBondToken__SenderNotVerified();
+        }
+        // aggiornare l' accounting del tot value per slot prima di burnare
+    }
+
+    function _beforeTransfer(
+        address _from,
+        address _to,
+        uint256 _fromTokenId,
+        uint256 _toTokenId,
+        uint256 _slot,
+        uint256 _value
+    ) internal {
+        if(s_frozenWallets[_to]){
+            revert TreasuryBondToken__ReceiverFrozen();
+        }
+        if(s_frozenWallets[_from]){
+            revert TreasuryBondToken__SenderFrozen();
+        }
+        if(s_tokenIdentityRegistry.isVerified(_to) == false){
+            revert TreasuryBondToken__ReceiverNotVerified();
+        }
+        if(s_tokenIdentityRegistry.isVerified(_to) == false){
+            revert TreasuryBondToken__SenderNotVerified();
+        }
+        // se si vuole implementare la funzione di transfer forzato dal protocol owner, è necessario aggiornare l' accounting del tot value per slot anche durante i transfer
     }
 
     /**
      * @notice Hook that is called after any transfer of value. This includes minting and burning.
      * @dev This function can be used to implement custom logic that needs to run after value transfers.
-     * @param from_ The address which previously owned the token (zero address if minting).
-     * @param to_ The address which will receive the token (zero address if burning).
-     * @param fromTokenId_ The token ID from which value is being transferred (zero if minting).
-     * @param toTokenId_ The token ID to which value is being transferred (zero if burning).
-     * @param slot_ The slot of the token being transferred.
-     * @param value_ The amount of value being transferred.
+     * @param _from The address which previously owned the token (zero address if minting).
+     * @param _to The address which will receive the token (zero address if burning).
+     * @param _fromTokenId The token ID from which value is being transferred (zero if minting).
+     * @param _toTokenId The token ID to which value is being transferred (zero if burning).
+     * @param _slot The slot of the token being transferred.
+     * @param _value The amount of value being transferred.
      */
     function _afterValueTransfer(
-        address from_,
-        address to_,
-        uint256 fromTokenId_,
-        uint256 toTokenId_,
-        uint256 slot_,
-        uint256 value_
+        address _from,
+        address _to,
+        uint256 _fromTokenId,
+        uint256 _toTokenId,
+        uint256 _slot,
+        uint256 _value
     ) internal override {}
 
-    function _calculateEntryFees(
+
+
+       function _calculateEntryFees(
         uint256 _amount
     ) internal returns (uint256 netAmount, uint256 feeCollected) {
         feeCollected = (_amount * PERCENTAGE_ENTRY_FEE) / PERCENTAGE_PRECISION;
@@ -299,6 +393,11 @@ contract TreasuryBondToken is ERC3525, AccessControl {
         // @audit-issue implement exit fee calculation
         // se il token è maturo non applicare fee
         // altrimenti applica anche una fee di uscita anticipata ponderata sulla diff tra scadenza e timestamp (es. 2%)
+    }
+
+    function _calculateYieldFees(uint256 _yieldAmount) internal returns (uint256 netYield, uint256 feeCollected) {
+        // feeCollected = (_yieldAmount * PERCENTAGE_YIELD_FEE) / PERCENTAGE_PRECISION;
+        // netYield = _yieldAmount - feeCollected;
     }
 
     function _convertUsdcUsd(
@@ -333,13 +432,50 @@ contract TreasuryBondToken is ERC3525, AccessControl {
         }
     }
 
+
+    /**
+     * @notice Returns the total value deposited for a specific bond slot (maturity).
+     * @dev Each slot represents a different bond maturity (2Y, 5Y, 10Y, 30Y).
+     * @param _slot The slot ID representing the bond maturity.
+     * @return The total value (in USDC) deposited in the specified slot.
+     */
     function getTotalValuePerSlot(
         uint256 _slot
     ) external view onlyValidSlot(_slot) returns (uint256) {
         return s_totalValuePerSlot[_slot];
     }
 
+
+    /**
+     * @notice Returns the position data for a given tokenId.
+     * @dev Includes interest rate, mint timestamp, and maturity timestamp for the position.
+     * @param _tokenId The ERC-3525 token ID representing the position.
+     * @return The PositionData struct containing details about the position.
+     */
+    function getPositionData(
+        uint256 _tokenId
+    ) external view returns (PositionData memory) {
+        _requireMinted(_tokenId);
+        return s_fromIdToPositionData[_tokenId];
+    }
+
+    /**
+     * @notice Returns the total fees collected by the protocol.
+     * @dev Fees are collected on yield and entry operations.
+     * @return The total amount of fees collected (in USDC).
+     */
     function getTotalFeesCollected() external view returns (uint256) {
         return s_totalFeesCollected;
     }
+
+    function getFrozenWalletStatus(address _wallet) external view returns (bool) {
+        return s_frozenWallets[_wallet];
+    }
+
+    function getFrozenTokens(address _wallet) external view returns (uint256) {
+        return s_frozenTokens[_wallet];
+    }
+
+    function identityRegistry() external view returns (IIdentityRegistry) {
+        return s_tokenIdentityRegistry;
 }
