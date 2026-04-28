@@ -5,7 +5,6 @@ import {IReservesOracle} from "../interfaces/IReservesOracle.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {ReservesResponse} from "../types.sol";
-import "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import "@openzeppelin/contracts/utils/introspection/ERC165.sol";
 
 contract ReservesOracle is IReservesOracle, ERC165, AccessControl {
@@ -18,7 +17,6 @@ contract ReservesOracle is IReservesOracle, ERC165, AccessControl {
     ReservesResponse internal s_reservesResponse;
     address internal s_functionsConsumer;
     address internal s_reservesSigner;
-    uint8 internal s_decimals;
 
     constructor(address _functionsConsumer, address _reservesSigner) {
         if (_functionsConsumer == address(0) || _reservesSigner == address(0))
@@ -29,54 +27,68 @@ contract ReservesOracle is IReservesOracle, ERC165, AccessControl {
         s_reservesSigner = _reservesSigner;
     }
 
-    function updateNav(
+
+    function updateUsdValue(
         bytes memory response,
         bytes memory err
     ) external onlyRole(UPDATER_ROLE) {
         if (err.length > 0) {
-            emit NavUpdateFailed(err);
+            emit UsdValueUpdateFailed(err);
             return;
         }
 
         (
-            uint256[4] memory navs,
-            uint256 timestamp,
+        uint256[4] memory usdValues,
+            uint256 totalUsd,
             bytes memory signature,
-            bytes32 hash
-        ) = abi.decode(response, (uint256[4], uint256, bytes, bytes32));
-
-        if (navs.length < 4)
-            revert ReservesOracle__IncompleteResponse(navs.length);
+            bytes32 hash,
+            uint256 timestamp
+        ) = abi.decode(
+            response,
+            (uint256[4], uint256, bytes, bytes32, uint256)
+        );
 
         address recovered = ECDSA.recover(hash, signature);
         if (recovered != s_reservesSigner)
             revert ReservesOracle__InvalidSignature(recovered);
 
+        uint256 computedSum =
+            usdValues[0] +
+            usdValues[1] +
+            usdValues[2] +
+            usdValues[3];
+
+        // tolerance for onchain vs offchain summation discrepancies, set to 1e6 (0.000001 in 6 decimals) to allow for minor rounding differences
+        if(computedSum > totalUsd + 1e6){
+            revert ReservesOracle__BucketMismatchVsTotal();
+        }
+
         s_reservesResponse = ReservesResponse({
-            twoYearNav: navs[0],
-            fiveYearNav: navs[1],
-            tenYearNav: navs[2],
-            thirtyYearNav: navs[3],
+            twoYearUsdValue: usdValues[0],
+            fiveYearUsdValue: usdValues[1],
+            tenYearUsdValue: usdValues[2],
+            thirtyYearUsdValue: usdValues[3],
             timestamp: timestamp
         });
 
-        emit NavUpdated(
-            s_reservesResponse.twoYearNav,
-            s_reservesResponse.fiveYearNav,
-            s_reservesResponse.tenYearNav,
-            s_reservesResponse.thirtyYearNav,
-            s_reservesResponse.timestamp
+        emit UsdValueUpdated(
+            usdValues[0],
+            usdValues[1],
+            usdValues[2],
+            usdValues[3],
+            totalUsd,
+            timestamp
         );
     }
 
-    function getNav(uint256 _slot) external view returns (uint256) {
-        ReservesResponse memory navs = s_reservesResponse;
-        if (_isStale(navs.timestamp)) revert ReservesOracle__DataIsStale();
+    function getUsdValue(uint256 _slot) external view returns (uint256) {
+        ReservesResponse memory usdValues = s_reservesResponse;
+        if (_isStale(usdValues.timestamp)) revert ReservesOracle__DataIsStale();
 
-        if (_slot == 1) return navs.twoYearNav;
-        if (_slot == 2) return navs.fiveYearNav;
-        if (_slot == 3) return navs.tenYearNav;
-        if (_slot == 4) return navs.thirtyYearNav;
+        if (_slot == 1) return usdValues.twoYearUsdValue;
+        if (_slot == 2) return usdValues.fiveYearUsdValue;
+        if (_slot == 3) return usdValues.tenYearUsdValue;
+        if (_slot == 4) return usdValues.thirtyYearUsdValue;
 
         revert ReservesOracle__InvalidSlot();
     }

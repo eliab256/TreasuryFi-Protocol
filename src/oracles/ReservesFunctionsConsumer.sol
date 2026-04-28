@@ -33,7 +33,7 @@ contract ReservesFunctionsConsumer is
 
     // @audit-issue modificare l'url con quello definitivo del server SPV
     string internal constant source =
-        'const url = "https://your-spv.vercel.app/api/nav";'
+        'const url = "https://your-spv.vercel.app/api/usdValues";'
         "const response = await Functions.makeHttpRequest({ url });"
         "const decimals = 8;"
         "if (response.error) {"
@@ -47,11 +47,12 @@ contract ReservesFunctionsConsumer is
         '  ["uint256[4]", "uint256", "bytes", "bytes32"],'
         "  ["
         "    ["
-        '              Math.round(data.nav_by_bucket["2Y"]  * 10 ** decimals),'
-        '              Math.round(data.nav_by_bucket["5Y"]  * 10 ** decimals),'
-        '              Math.round(data.nav_by_bucket["10Y"] * 10 ** decimals),'
-        '              Math.round(data.nav_by_bucket["30Y"] * 10 ** decimals),'
+        '              Math.round(data.usdValue_by_bucket["2Y"]  * 10 ** decimals),'
+        '              Math.round(data.usdValue_by_bucket["5Y"]  * 10 ** decimals),'
+        '              Math.round(data.usdValue_by_bucket["10Y"] * 10 ** decimals),'
+        '              Math.round(data.usdValue_by_bucket["30Y"] * 10 ** decimals),'
         "    ],"
+        "    Math.round(data.cash_usd * 10 ** decimals)," 
         "    data.timestamp,"
         "    signature,"
         "    hash"
@@ -108,22 +109,49 @@ contract ReservesFunctionsConsumer is
 
         uint256 timestampResponse = 0;
 
+        
         if (err.length == 0 && response.length > 0) {
-            (uint256[4] memory navs, uint256 ts, , ) = abi.decode(
+            (
+                uint256[4] memory usdValues,
+                uint256 cashUsd,
+                uint256 ts,
+                bytes memory signature,
+                bytes32 hash
+            ) = abi.decode(
                 response,
-                (uint256[4], uint256, bytes, bytes32)
+                (uint256[4], uint256, uint256, bytes, bytes32)
             );
-            if (navs.length < 4)
-                revert ReservesFunctionsConsumer__IncompleteResponse(navs.length);
-            timestampResponse = ts;
+
+            timestamp = ts;
+
+            // forward structured data to oracle
+            try
+                IReservesOracle(i_reservesOracle).updateUsdValues(
+                    usdValues,
+                    cashUsd,
+                    ts,
+                    signature,
+                    hash,
+                    err
+                )
+            {} catch (bytes memory oracleErr) {
+                emit OracleUpdateFailed(oracleErr);
+            }
+        } else {
+            // forward error anyway
+            try
+                IReservesOracle(i_reservesOracle).updateUsdValues(
+                    new uint256[](0),
+                    0,
+                    0,
+                    "",
+                    bytes32(0),
+                    err
+                )
+            {} catch {}
         }
 
-        try IReservesOracle(i_reservesOracle).updateNav(response, err) {
-            // success
-        } catch (bytes memory oracleErr) {
-            emit OracleUpdateFailed(oracleErr);
-        }
-        emit Response(requestId, timestampResponse, response, err);
+        emit Response(requestId, timestamp, response, err);
     }
 
     // --- Getters ---

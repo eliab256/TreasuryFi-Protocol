@@ -26,12 +26,7 @@ import {PositionData} from "../types.sol";
  * Users can open new positions by depositing USDC and minting tokens, or close positions by burning tokens and withdrawing USDC.
  * The contract includes role-based access control for fee management and administrative functions.
  */
-contract TreasuryBondToken is ERC3525, AccessControl {
-
-    event IdentityRegistryAdded(address indexed identityRegistry);
-    event AddressFrozen(address indexed wallet, bool indexed frozen, address indexed owner);
-    event TokensFrozen(address indexed user, uint256 amount);
-    event TokensUnfrozen(address indexed user, uint256 amount);
+contract TreasuryBondToken is ERC3643, ERC3525, AccessControl {
 
     // Nuovi eventi
     event PositionOpened(address indexed user, uint256 indexed tokenId, uint256 slot, uint256 value, uint256 feeCollected);
@@ -81,12 +76,10 @@ contract TreasuryBondToken is ERC3525, AccessControl {
     IReservesOracle private immutable i_reservesOracle;
     IBondOracle private immutable i_bondOracle;
 
-    IIdentityRegistry private s_tokenIdentityRegistry;
-
+    /// @dev liabilities for each slot, updated on mint, burn and yield claim
     mapping(uint256 => uint256) private s_totalValuePerSlot;
+
     mapping(uint256 => PositionData) private s_fromIdToPositionData;
-    mapping(address => bool) private s_frozenWallets;
-    mapping(address => uint256) internal s_frozenTokens;
     uint256 private s_totalFeesCollected;
 
     bytes32 public constant FEES_MANAGER_ROLE = keccak256("FEES_MANAGER_ROLE");
@@ -103,12 +96,12 @@ contract TreasuryBondToken is ERC3525, AccessControl {
     }
 
     modifier whenNotPaused() {
-        ERC3643._whenNotPaused();
+        super._whenNotPaused();
         _;
     }
 
     modifier whenPaused(){
-        ERC3643._whenPaused();
+        super._whenPaused();
         _;
     }
 
@@ -123,7 +116,7 @@ contract TreasuryBondToken is ERC3525, AccessControl {
         address _reservesOracle,
         address _bondOracle,
         address _feesCollector
-    ) ERC3525(_name, _symbol, _decimals) ERC3643(_name, _symbol, _decimals, address(this), _identityRegistry, address(0)) {
+    ) ERC3643(_name, _symbol, _decimals, address(this), _identityRegistry, address(0)) ERC3525(_name, _symbol, _decimals)  {
         // Checks
         if (
             _usdcAddress == address(0) ||
@@ -161,7 +154,6 @@ contract TreasuryBondToken is ERC3525, AccessControl {
         i_minimumDepositAmount = 10 * (10 ** i_usdcDecimals); // 10 USDC with decimals
         i_reservesOracle = IReservesOracle(_reservesOracle);
         i_bondOracle = IBondOracle(_bondOracle);
-        setIdentityRegistry(_identityRegistry);
     }
 
     function supportsInterface(
@@ -169,8 +161,6 @@ contract TreasuryBondToken is ERC3525, AccessControl {
     ) public view override(ERC3525, AccessControl) returns (bool) {
         return super.supportsInterface(interfaceId);
     }
-
-   
 
     function openNewPosition(
         address _mintTo,
@@ -247,7 +237,7 @@ contract TreasuryBondToken is ERC3525, AccessControl {
         uint256 _value
     ) public payable override etherNotAccepted whenNotPaused returns (uint256 newTokenId) {
         // @audit-issue implement T-REX checks
-        newTokenId = super.transferFrom(_fromTokenId, _to, _value);
+       // newTokenId = super.transferFrom(_fromTokenId, _to, _value);
     }
 
     function transferFrom(
@@ -257,7 +247,7 @@ contract TreasuryBondToken is ERC3525, AccessControl {
     ) public payable override etherNotAccepted whenNotPaused{
         // @audit-issue implement checks
         // T-rex checks
-        super.transferFrom(_from, _to, _tokenId);
+        //super.transferFrom(_from, _to, _tokenId);
     }
 
     function safeTransferFrom(
@@ -268,7 +258,7 @@ contract TreasuryBondToken is ERC3525, AccessControl {
     ) public payable override etherNotAccepted whenNotPaused {
         // @audit-issue implement checks
         // T-rex checks
-        super.safeTransferFrom(_from, _to, _tokenId, _data);
+        //super.safeTransferFrom(_from, _to, _tokenId, _data);
     }
 
     function safeTransferFrom(
@@ -278,7 +268,7 @@ contract TreasuryBondToken is ERC3525, AccessControl {
     ) public payable override etherNotAccepted whenNotPaused {
         // @audit-issue implement checks
         // T-rex checks
-        super.safeTransferFrom(_from, _to, _tokenId, "");
+        //super.safeTransferFrom(_from, _to, _tokenId, "");
     }
 
     function claimYield(uint256 _tokenId) public whenNotPaused {
@@ -320,6 +310,10 @@ contract TreasuryBondToken is ERC3525, AccessControl {
         uint256 _slot,
         uint256 _value
     ) internal override {
+        // 1. ERC3643 checks
+        super._beforeValueTransfer(_from, _to, _fromTokenId, _toTokenId, _slot, _value);
+
+        // 2. Conditional logic based on whether it's a mint, burn, or transfer
         if (_from == address(0)) {
             _beforeMint(_to, _toTokenId, _slot, _value);
         } else if (_to == address(0)) {
@@ -335,13 +329,8 @@ contract TreasuryBondToken is ERC3525, AccessControl {
         uint256 _slot,
         uint256 _value
     ) internal {
-        // 1. Checks on receiver compliance with T-REX
-        if(s_frozenWallets[_to]){
-            revert TreasuryBondToken__ReceiverFrozen();
-        }
-        if(s_tokenIdentityRegistry.isVerified(_to) == false){
-            revert TreasuryBondToken__ReceiverNotVerified();
-        }
+       
+
 
         // 2. Checks Reserves oracle
         // aggiornare l' accounting del tot value per slot prima di mintare
@@ -353,12 +342,7 @@ contract TreasuryBondToken is ERC3525, AccessControl {
         uint256 _slot,
         uint256 _value
     ) internal {
-        if(s_frozenWallets[_from]){
-            revert TreasuryBondToken__SenderFrozen();
-        }
-        if(s_tokenIdentityRegistry.isVerified(_to) == false){
-            revert TreasuryBondToken__SenderNotVerified();
-        }
+
         // aggiornare l' accounting del tot value per slot prima di burnare
     }
 
@@ -370,18 +354,7 @@ contract TreasuryBondToken is ERC3525, AccessControl {
         uint256 _slot,
         uint256 _value
     ) internal {
-        if(s_frozenWallets[_to]){
-            revert TreasuryBondToken__ReceiverFrozen();
-        }
-        if(s_frozenWallets[_from]){
-            revert TreasuryBondToken__SenderFrozen();
-        }
-        if(s_tokenIdentityRegistry.isVerified(_to) == false){
-            revert TreasuryBondToken__ReceiverNotVerified();
-        }
-        if(s_tokenIdentityRegistry.isVerified(_to) == false){
-            revert TreasuryBondToken__SenderNotVerified();
-        }
+
         // se si vuole implementare la funzione di transfer forzato dal protocol owner, è necessario aggiornare l' accounting del tot value per slot anche durante i transfer
     }
 
@@ -404,9 +377,20 @@ contract TreasuryBondToken is ERC3525, AccessControl {
         uint256 _value
     ) internal override {}
 
+    /**
+        * @notice Internal function to retrieve the NAV for a given slot from the Reserves Oracle.
+        * @notice getNav reverts on reservesOracle contract if the data is stale, so no need to check staleness here
+        * @param _slot The slot ID for which to retrieve the NAV (1 for 2Y, 2 for 5Y, 3 for 10Y, 4 for 30Y).
+        * @return slotNav The NAV value for the specified slot.
+        * @return navDecimals The number of decimals of the NAV value returned by the oracle.
+     */
+    function _getNav(uint256 _slot) internal view returns (uint256 slotNav, uint8 navDecimals) {
+        slotNav = i_reservesOracle.getNav(_slot);
+        navDecimals = i_reservesOracle.getDecimals(); 
+    }
 
 
-       function _calculateEntryFees(
+    function _calculateEntryFees(
         uint256 _amount
     ) internal returns (uint256 netAmount, uint256 feeCollected) {
         feeCollected = (_amount * PERCENTAGE_ENTRY_FEE) / PERCENTAGE_PRECISION;
@@ -495,12 +479,20 @@ contract TreasuryBondToken is ERC3525, AccessControl {
         return s_totalFeesCollected;
     }
 
-    function getFrozenWalletStatus(address _wallet) external view returns (bool) {
-        return s_frozenWallets[_wallet];
+
+    function getLiabilitiesForSlot(uint256 _slot) external view onlyValidSlot(_slot) returns (uint256) {
+         return s_totalValuePerSlot[_slot];
     }
 
-    function getFrozenTokens(address _wallet) external view returns (uint256) {
-        return s_frozenTokens[_wallet];
+
+    // @audit-issue move to a separated risk managment contract
+    function getLiabilitiesForAllSlots() external view returns (uint256[4] memory) {
+        uint256[4] memory liabilities;
+        liabilities[0] = s_totalValuePerSlot[SLOT_2Y];
+        liabilities[1] = s_totalValuePerSlot[SLOT_5Y];
+        liabilities[2] = s_totalValuePerSlot[SLOT_10Y];
+        liabilities[3] = s_totalValuePerSlot[SLOT_30Y];
+        return liabilities;
     }
 
 }

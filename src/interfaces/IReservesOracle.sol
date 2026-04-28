@@ -8,22 +8,24 @@ interface IReservesOracle {
     error ReservesOracle__InvalidSlot();
     error ReservesOracle__IncompleteResponse(uint256 length);
     error ReservesOracle__InvalidSignature(address recovered);
+    error ReservesOracle__BucketMismatchVsTotal();
 
     // Events
-    event NavUpdated(
-        uint256 twoYearNav,
-        uint256 fiveYearNav,
-        uint256 tenYearNav,
-        uint256 thirtyYearNav,
+
+    event UsdValueUpdated(
+        uint256 twoYearUsdValue,
+        uint256 fiveYearUsdValue,
+        uint256 tenYearUsdValue,
+        uint256 thirtyYearUsdValue,
         uint256 timestamp
     );
-    event NavUpdateFailed(bytes err);
+    event UsdValueUpdateFailed(bytes err);
 
     // Actions (onlyRole UPDATER_ROLE)
-    function updateNav(bytes memory response, bytes memory err) external;
+    function updateUsdValue(bytes memory response, bytes memory err) external;
 
     // Getters
-    function getNav(uint256 slot) external view returns (uint256);
+    function getUsdValue(uint256 slot) external view returns (uint256);
     function isStale() external view returns (bool);
     function getLastUpdatedTimestamp() external view returns (uint256);
     function getFunctionsConsumer() external view returns (address);

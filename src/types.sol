@@ -10,10 +10,11 @@ struct BondYieldsResponse {
 }
 
 struct ReservesResponse {
-    uint256 twoYearNav;
-    uint256 fiveYearNav;
-    uint256 tenYearNav;
-    uint256 thirtyYearNav;
+    uint256 twoYearUsdValue;
+    uint256 fiveYearUsdValue;
+    uint256 tenYearUsdValue;
+    uint256 thirtyYearUsdValue;
+    uint256 cashBufferUsdValue;
     uint256 timestamp;
 }
 

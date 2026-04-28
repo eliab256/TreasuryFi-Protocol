@@ -40,11 +40,11 @@ contract BondOracle is IBondOracle, ERC165, AccessControl {
             timestamp: timestamp
         });
         emit YieldUpdated(
-            s_bondYieldsResponse.twoYearYield,
-            s_bondYieldsResponse.fiveYearYield,
-            s_bondYieldsResponse.tenYearYield,
-            s_bondYieldsResponse.thirtyYearYield,
-            s_bondYieldsResponse.timestamp
+            values[0],
+            values[1],
+            values[2],
+            values[3],
+            timestamp
         );
     }
 

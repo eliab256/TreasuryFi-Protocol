@@ -4,10 +4,9 @@ pragma solidity ^0.8.0;
 
 import {IIdentityRegistry} from "@t-rex/registry/interface/IIdentityRegistry.sol";
 import {IModularCompliance} from "@t-rex/compliance/modular/IModularCompliance.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 
-abstract contract ERC3643 is Ownable {
-
+abstract contract ERC3643 is AccessControl {
 
     // Eventi
     event IdentityRegistryAdded(address indexed identityRegistry);
@@ -28,6 +27,8 @@ abstract contract ERC3643 is Ownable {
     error ERC3643__TokenNotPaused();
     error ERC3643__AmountExceedsAvailableValue();
     error ERC3643__AmountExceedsAvailableFrozen();
+    error ERC3643__NoTokensToRecover();
+    error ERC3643__RecoveryNotPossible();
 
     /// @dev Token information
     string internal   s_tokenName;
@@ -41,6 +42,7 @@ abstract contract ERC3643 is Ownable {
     // mapping: tokenId => frozen value
     mapping(uint256 => uint256) private s_frozenValues;
 
+    bytes32 public constant OWNER_ROLE = keccak256("OWNER_ROLE");
     bool internal s_tokenPaused = false;
 
     /// @dev Identity Registry contract used by the onchain validator system
@@ -56,7 +58,7 @@ abstract contract ERC3643 is Ownable {
         address _onchainID,
         address _identityRegistry,
         address _compliance
-    ) Ownable() {
+    )  {
         if (bytes(_name).length == 0) revert ERC3643__InvalidName();
         if (bytes(_symbol).length == 0)
             revert ERC3643__InvalidSymbol();
@@ -66,6 +68,10 @@ abstract contract ERC3643 is Ownable {
         s_tokenSymbol = _symbol;
         i_tokenDecimals = _decimals;
         s_tokenOnchainID = _onchainID;
+
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(OWNER_ROLE, msg.sender);
+
         setIdentityRegistry(_identityRegistry);
         setCompliance(_compliance);
     }
@@ -75,52 +81,79 @@ abstract contract ERC3643 is Ownable {
      */
     function setIdentityRegistry(
         address _identityRegistry
-    ) public onlyOwner {
+    ) public onlyRole(OWNER_ROLE) {
          if (_identityRegistry == address(0)) revert ERC3643__ZeroAddress();
         s_tokenIdentityRegistry = IIdentityRegistry(_identityRegistry);
         emit IdentityRegistryAdded(_identityRegistry);
     }
 
-    function setName(string calldata _name) external onlyOwner {
+    function setName(string calldata _name) external onlyRole(OWNER_ROLE) {
           if (bytes(_name).length == 0) revert ERC3643__InvalidName();
         s_tokenName = _name;
         emit UpdatedTokenInformation(s_tokenName, s_tokenSymbol, i_tokenDecimals, TOKEN_VERSION, s_tokenOnchainID);
     }
 
-    function setSymbol(string calldata _symbol) external onlyOwner {
+    function setSymbol(string calldata _symbol) external onlyRole(OWNER_ROLE) {
         if (bytes(_symbol).length == 0) revert ERC3643__InvalidSymbol();
         s_tokenSymbol = _symbol;
         emit UpdatedTokenInformation(s_tokenName, s_tokenSymbol, i_tokenDecimals, TOKEN_VERSION, s_tokenOnchainID);
     }
 
-    function setOnchainID(address _onchainID) external onlyOwner {
+    function setOnchainID(address _onchainID) external onlyRole(OWNER_ROLE) {
         s_tokenOnchainID = _onchainID;
         emit UpdatedTokenInformation(s_tokenName, s_tokenSymbol, i_tokenDecimals, TOKEN_VERSION, s_tokenOnchainID);
     }
 
-    function pause() external onlyOwner {
+    // @audit-issue aggiustare la funzione per erc3525
+    function recoveryAddress(
+            address lostWallet,
+            address newWallet,
+            address investorOnchainID
+        ) external onlyRole(OWNER_ROLE) returns (bool) {
+            if (balanceOf(lostWallet) == 0) revert ERC3643__NoTokensToRecover();
+            IIdentity onchainID = IIdentity(investorOnchainID);
+            bytes32 key = keccak256(abi.encode(newWallet));
+            if (onchainID.keyHasPurpose(key, 1)) {
+                uint256 investorTokens = balanceOf(lostWallet);
+                uint256 frozenTokens = s_frozenValues[uint256(uint160(lostWallet))];
+                s_tokenIdentityRegistry.registerIdentity(newWallet, onchainID, s_tokenIdentityRegistry.investorCountry(lostWallet));
+                forcedTransfer(lostWallet, newWallet, investorTokens);
+                if (frozenTokens > 0) {
+                    freezePartialTokens(uint256(uint160(newWallet)), frozenTokens);
+                }
+                if (s_frozenWallets[lostWallet] == true) {
+                    setAddressFrozen(newWallet, true);
+                }
+                s_tokenIdentityRegistry.deleteIdentity(lostWallet);
+                emit RecoverySuccess(lostWallet, newWallet, investorOnchainID);
+                return true;
+            }
+            revert ERC3643__RecoveryNotPossible();
+        }
+
+    function pause() external onlyRole(OWNER_ROLE) {
         _whenNotPaused();
         s_tokenPaused = true;
         emit Paused(msg.sender);
     }
 
-    function unpause() external onlyOwner {
+    function unpause() external onlyRole(OWNER_ROLE) {
         _whenPaused();
         s_tokenPaused = false;
         emit Unpaused(msg.sender);
     }
 
 
-    function setAddressFrozen(address _userAddress, bool _freeze) external onlyOwner {
-         _setAddressFrozen(_userAddress, _freeze);
+    function setAddressFrozen(address _userAddress, bool _freeze) external onlyRole(OWNER_ROLE) {
+        _setAddressFrozen(_userAddress, _freeze);
     }
 
 
-    function freezePartialTokens(uint256 _tokenId, uint256 _amount) external onlyOwner {
+    function freezePartialTokens(uint256 _tokenId, uint256 _amount) external onlyRole(OWNER_ROLE) {
         _freezePartialToken(_tokenId, _amount);
     }
 
-    function unfreezePartialTokens(uint256 _tokenId, uint256 _amount) external onlyOwner {
+    function unfreezePartialTokens(uint256 _tokenId, uint256 _amount) external onlyRole(OWNER_ROLE) {
         _unfreezePartialToken(_tokenId, _amount);
     }
 
@@ -194,7 +227,7 @@ abstract contract ERC3643 is Ownable {
         }
     }
 
-    function setCompliance(address _compliance) public  onlyOwner {
+    function setCompliance(address _compliance) public onlyRole(OWNER_ROLE) {
         if (address(s_tokenCompliance) != address(0)) {
             s_tokenCompliance.unbindToken(address(this));
         }
@@ -231,6 +264,10 @@ abstract contract ERC3643 is Ownable {
         return TOKEN_VERSION;
     }
 
+    function getWalletFrozenStatus(address _wallet) external view returns (bool) {
+        return s_frozenWallets[_wallet];
+    }
+
     function getFrozenValue(uint256 _tokenId) external view returns (uint256) {
     return s_frozenValues[_tokenId];
     }
@@ -239,22 +276,46 @@ abstract contract ERC3643 is Ownable {
         return balanceOf(_tokenId) - s_frozenValues[_tokenId];
     }
 
-    function _beforeValueTransfer(address _from,
+    function _beforeValueTransfer(
+        address _from,
         address _to,
         uint256 _fromTokenId,
         uint256 _toTokenId,
         uint256 _slot,
-        uint256 _value) internal {
+        uint256 _value) internal override{
+            _whenNotPaused();
+            if(_from != address(0)){
+                if(! s_tokenIdentityRegistry.isVerified(_from)){
+                    revert ERC3643__SenderNotVerified();
+                }
+                if(s_frozenWallets[_from]){
+                    revert ERC3643__SenderFrozen();
+                    }
+                uint256 frozenValue = s_frozenValues[_fromTokenId];
+                // recuperare valore token e proprietario per check frozen value
+                // @audit-info recuperare info da erc3525 per check frozen value
+            }
+            if(_to != address(0)){
+                if(! s_tokenIdentityRegistry.isVerified(_to)){
+                    revert ERC3643__ReceiverNotVerified();
+                }
+                if(s_frozenWallets[_to]){
+                    revert ERC3643__ReceiverFrozen();   
+                }
+
+                uint256 frozenValue = s_frozenValues[_toTokenId];
+            }
+    }
+
+    function _afterValueTransfer(
+        address _from,
+        address _to,
+        uint256 _fromTokenId,
+        uint256 _toTokenId,
+        uint256 _slot,
+        uint256 _value) internal override {
             
     }
 
-    function _afterValueTransfer(address _from,
-        address _to,
-        uint256 _fromTokenId,
-        uint256 _toTokenId,
-        uint256 _slot,
-        uint256 _value) internal {
-            
-    }
 
 }
