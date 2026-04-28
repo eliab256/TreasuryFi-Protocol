@@ -37,7 +37,7 @@ interface IReservesOracle {
     // Getters
     function getReserveUsdValue(uint256 slot) external view returns (uint256);
     function getTotalUsdValue() external view returns (uint256);
-    function getCashUsdValue() external view returns (uint256);
+    function getCashBufferUsdValue() external view returns (uint256);
     function isStale() external view returns (bool);
     function getLastUpdatedTimestamp() external view returns (uint256);
     function getFunctionsConsumer() external view returns (address);

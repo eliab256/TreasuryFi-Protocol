@@ -5,6 +5,7 @@ pragma solidity ^0.8.0;
 import {IIdentityRegistry} from "@t-rex/registry/interface/IIdentityRegistry.sol";
 import {IModularCompliance} from "@t-rex/compliance/modular/IModularCompliance.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {IIdentity} from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 
 abstract contract ERC3643 is AccessControl {
 
@@ -17,6 +18,8 @@ abstract contract ERC3643 is AccessControl {
     event Paused(address indexed account); 
     event Unpaused(address indexed account); 
     event UpdatedTokenInformation(string name, string symbol, uint8 decimals, string version, address onchainID); 
+    event RecoverySuccess(address indexed lostWallet, address indexed newWallet, address indexed investorOnchainID);
+
 
     // Custom error
     error ERC3643__InvalidName();
@@ -29,6 +32,11 @@ abstract contract ERC3643 is AccessControl {
     error ERC3643__AmountExceedsAvailableFrozen();
     error ERC3643__NoTokensToRecover();
     error ERC3643__RecoveryNotPossible();
+    error ERC3643__SenderNotVerified();
+    error ERC3643__ReceiverNotVerified();
+    error ERC3643__SenderFrozen();
+    error ERC3643__ReceiverFrozen();
+
 
     /// @dev Token information
     string internal   s_tokenName;
@@ -41,6 +49,7 @@ abstract contract ERC3643 is AccessControl {
     mapping(address => bool) internal s_frozenWallets;
     // mapping: tokenId => frozen value
     mapping(uint256 => uint256) private s_frozenValues;
+    bool internal s_recovering;
 
     bytes32 public constant OWNER_ROLE = keccak256("OWNER_ROLE");
     bool internal s_tokenPaused = false;
@@ -106,30 +115,52 @@ abstract contract ERC3643 is AccessControl {
 
     // @audit-issue aggiustare la funzione per erc3525
     function recoveryAddress(
-            address lostWallet,
-            address newWallet,
-            address investorOnchainID
-        ) external onlyRole(OWNER_ROLE) returns (bool) {
-            if (balanceOf(lostWallet) == 0) revert ERC3643__NoTokensToRecover();
-            IIdentity onchainID = IIdentity(investorOnchainID);
-            bytes32 key = keccak256(abi.encode(newWallet));
-            if (onchainID.keyHasPurpose(key, 1)) {
-                uint256 investorTokens = balanceOf(lostWallet);
-                uint256 frozenTokens = s_frozenValues[uint256(uint160(lostWallet))];
-                s_tokenIdentityRegistry.registerIdentity(newWallet, onchainID, s_tokenIdentityRegistry.investorCountry(lostWallet));
-                forcedTransfer(lostWallet, newWallet, investorTokens);
-                if (frozenTokens > 0) {
-                    freezePartialTokens(uint256(uint160(newWallet)), frozenTokens);
-                }
-                if (s_frozenWallets[lostWallet] == true) {
-                    setAddressFrozen(newWallet, true);
-                }
-                s_tokenIdentityRegistry.deleteIdentity(lostWallet);
-                emit RecoverySuccess(lostWallet, newWallet, investorOnchainID);
-                return true;
-            }
-            revert ERC3643__RecoveryNotPossible();
+    address lostWallet,
+    address newWallet,
+    address investorOnchainID
+    ) external onlyRole(OWNER_ROLE) returns (bool) {
+        // balanceOf(address) → number of ERC721 tokens owned, correct for "has token?" check
+        if (balanceOf(lostWallet) == 0) revert ERC3643__NoTokensToRecover();
+
+        IIdentity onchainID = IIdentity(investorOnchainID);
+        bytes32 key = keccak256(abi.encode(newWallet));
+
+        if (!onchainID.keyHasPurpose(key, 1)) revert ERC3643__RecoveryNotPossible();
+
+        // 1. Register the new wallet BEFORE the transfer
+        //    so _beforeValueTransfer finds newWallet as verified
+        s_tokenIdentityRegistry.registerIdentity(
+            newWallet,
+            onchainID,
+            s_tokenIdentityRegistry.investorCountry(lostWallet)
+        );
+
+        // 2. Recovery flag: bypasses the SenderFrozen check in _beforeValueTransfer
+        s_recovering = true;
+
+        // 3. Delegate the transfer of tokens (ERC3525 logic) to the child contract
+        _executeRecoveryTransfer(lostWallet, newWallet);
+
+        s_recovering = false;
+
+        // 4. Propagate the freeze at wallet level if present
+        if (s_frozenWallets[lostWallet]) {
+            _setAddressFrozen(newWallet, true);
+            _setAddressFrozen(lostWallet, false); // unfreeze the old wallet
         }
+
+        // 5. Remove the identity of the lost wallet
+        s_tokenIdentityRegistry.deleteIdentity(lostWallet);
+
+        emit RecoverySuccess(lostWallet, newWallet, investorOnchainID);
+        return true;
+    }
+
+    /// @dev Override in TreasuryBondToken to implement ERC3525 transfer
+    function _executeRecoveryTransfer(
+        address lostWallet,
+        address newWallet
+    ) internal virtual;
 
     function pause() external onlyRole(OWNER_ROLE) {
         _whenNotPaused();
@@ -288,11 +319,9 @@ abstract contract ERC3643 is AccessControl {
                 if(! s_tokenIdentityRegistry.isVerified(_from)){
                     revert ERC3643__SenderNotVerified();
                 }
-                if(s_frozenWallets[_from]){
+                if (!s_recovering && s_frozenWallets[_from]) {
                     revert ERC3643__SenderFrozen();
-                    }
-                uint256 frozenValue = s_frozenValues[_fromTokenId];
-                // recuperare valore token e proprietario per check frozen value
+                }
                 // @audit-info recuperare info da erc3525 per check frozen value
             }
             if(_to != address(0)){

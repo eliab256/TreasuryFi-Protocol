@@ -21,9 +21,6 @@ interface IBondOracle {
     /// @notice Returns the yield for a given slot (1=2Y, 2=5Y, 3=10Y, 4=30Y)
     /// @dev Reverts if data is stale or slot is invalid
     function getYield(uint256 slot) external view returns (uint64);
-    function getLastUpdatedTimestamp() external view returns (uint256);
-    function getFunctionsConsumer() external view returns (address);
-    function isStale() external view returns (bool);
     function updateYields(uint64[] memory values, uint256 timestamp, bytes memory err) external;
 
     /// @notice Returns true if the stored data is stale
@@ -32,8 +29,7 @@ interface IBondOracle {
     /// @notice Returns the last update timestamp
     function getLastUpdatedTimestamp() external view returns (uint256);
 
+    /// @notice Returns the address of the FunctionsConsumer contract authorized to update yields
     function getFunctionsConsumer() external view returns (address);
 
-    /// @notice Called by BondFunctionsConsumer to push new yield data
-    function updateYield(bytes memory response, bytes memory err) external;
 }

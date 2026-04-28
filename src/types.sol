@@ -15,6 +15,7 @@ struct ReservesResponse {
     uint256 tenYearUsdValue;
     uint256 thirtyYearUsdValue;
     uint256 cashBufferUsdValue;
+    uint256 totalUsdValue;
     uint256 timestamp;
 }
 

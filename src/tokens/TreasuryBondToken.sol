@@ -18,6 +18,7 @@ import {IBondOracle} from "../interfaces/IBondOracle.sol";
 import {IReservesOracle} from "../interfaces/IReservesOracle.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {PositionData} from "../types.sol";
+import {TokenConstants as C} from "./TokenConstants.sol";
 
 /**
  * @title TreasuryBondToken
@@ -26,7 +27,7 @@ import {PositionData} from "../types.sol";
  * Users can open new positions by depositing USDC and minting tokens, or close positions by burning tokens and withdrawing USDC.
  * The contract includes role-based access control for fee management and administrative functions.
  */
-contract TreasuryBondToken is ERC3643, ERC3525, AccessControl {
+contract TreasuryBondToken is ERC3643, ERC3525 {
 
     // Nuovi eventi
     event PositionOpened(address indexed user, uint256 indexed tokenId, uint256 slot, uint256 value, uint256 feeCollected);
@@ -38,6 +39,7 @@ contract TreasuryBondToken is ERC3643, ERC3525, AccessControl {
     event ExitFeeCollected(address indexed user, uint256 amount);
     event YieldFeeCollected(address indexed user, uint256 amount);
     event IdentityRegistrySet(address indexed identityRegistry);
+    
 
     error TreasuryBondToken__InvalidSlot();
     error TreasuryBondToken__FunctionDisabled();
@@ -53,19 +55,10 @@ contract TreasuryBondToken is ERC3643, ERC3525, AccessControl {
     error TreasuryBondToken__AmountExceedsAvailableBalance();
     error TreasuryBondToken__AmountShouldBeLessOrEqualToFrozen();
 
-    // Nuovi custom error
-    error TreasuryBondToken__ReceiverFrozen();
-    error TreasuryBondToken__SenderFrozen();
-
-    uint256 public constant SLOT_2Y = 1; // 2-Year Treasury exposure
-    uint256 public constant SLOT_5Y = 2; // 5-Year Treasury exposure
-    uint256 public constant SLOT_10Y = 3; // 10-Year Treasury exposure
-    uint256 public constant SLOT_30Y = 4; // 30-Year Treasury exposure
-
-    uint256 public constant PERCENTAGE_PRECISION = 10000; // For percentage calculations (e.g., 5% = 50000)
-    uint256 private constant MAX_PERCENTAGE = 100 * PERCENTAGE_PRECISION; // 100% in percentage precision
-    uint256 public constant PERCENTAGE_YIELD_FEE = 10 * PERCENTAGE_PRECISION; // 10% fee on yield
-    uint256 public constant PERCENTAGE_ENTRY_FEE = 1 * PERCENTAGE_PRECISION; // 1% fee on entry
+    
+    uint256 internal constant MAX_PERCENTAGE = 100 * C.PERCENTAGE_PRECISION; // 100% in percentage precision
+    uint256 internal constant PERCENTAGE_YIELD_FEE = 10 * C.PERCENTAGE_PRECISION; // 10% fee on yield
+    uint256 internal constant PERCENTAGE_ENTRY_FEE = 1 * C.PERCENTAGE_PRECISION; // 1% fee on entry
 
     IERC20 private immutable i_usdc;
     AggregatorV3Interface private immutable i_usdcPriceFeed;
@@ -105,7 +98,6 @@ contract TreasuryBondToken is ERC3643, ERC3525, AccessControl {
         _;
     }
 
-
     constructor(
         string memory _name,
         string memory _symbol,
@@ -144,8 +136,6 @@ contract TreasuryBondToken is ERC3643, ERC3525, AccessControl {
             );
         }
 
-        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _grantRole(OWNER_ROLE, msg.sender);
         _grantRole(FEES_MANAGER_ROLE, _feesCollector);
         i_usdc = IERC20(_usdcAddress);
         i_usdcPriceFeed = AggregatorV3Interface(_usdcPriceFeedAddress);
@@ -159,7 +149,7 @@ contract TreasuryBondToken is ERC3643, ERC3525, AccessControl {
     function supportsInterface(
         bytes4 interfaceId
     ) public view override(ERC3525, AccessControl) returns (bool) {
-        return super.supportsInterface(interfaceId);
+         return ERC3525.supportsInterface(interfaceId) || AccessControl.supportsInterface(interfaceId);
     }
 
     function openNewPosition(
@@ -358,6 +348,32 @@ contract TreasuryBondToken is ERC3643, ERC3525, AccessControl {
         // se si vuole implementare la funzione di transfer forzato dal protocol owner, è necessario aggiornare l' accounting del tot value per slot anche durante i transfer
     }
 
+
+    /// @inheritdoc ERC3643
+    function _executeRecoveryTransfer(
+        address lostWallet,
+        address newWallet
+    ) internal override {
+        // balanceOf(address) restituisce il numero di token ERC721 posseduti
+        uint256 tokenCount = balanceOf(lostWallet);
+
+        // Snapshot degli id PRIMA di trasferire (l'array cambia ad ogni trasferimento)
+        uint256[] memory tokenIds = new uint256[](tokenCount);
+        for (uint256 i = 0; i < tokenCount; i++) {
+            tokenIds[i] = tokenOfOwnerByIndex(lostWallet, i);
+        }
+
+        for (uint256 i = 0; i < tokenIds.length; i++) {
+            uint256 tokenId = tokenIds[i];
+
+            // I frozen values sono mappati per tokenId → seguono il token automaticamente,
+            // non serve migrarli (il mapping s_frozenValues[tokenId] rimane invariato).
+
+            // _transferTokenId è internal in ERC3525 e bypassa il check onlyApprovedOrOwner
+            _transferTokenId(lostWallet, newWallet, tokenId);
+        }
+    }
+
     /**
      * @notice Hook that is called after any transfer of value. This includes minting and burning.
      * @dev This function can be used to implement custom logic that needs to run after value transfers.
@@ -393,7 +409,7 @@ contract TreasuryBondToken is ERC3643, ERC3525, AccessControl {
     function _calculateEntryFees(
         uint256 _amount
     ) internal returns (uint256 netAmount, uint256 feeCollected) {
-        feeCollected = (_amount * PERCENTAGE_ENTRY_FEE) / PERCENTAGE_PRECISION;
+        feeCollected = (_amount * PERCENTAGE_ENTRY_FEE) / C.PERCENTAGE_PRECISION;
         netAmount = _amount - feeCollected;
     }
 
@@ -407,7 +423,7 @@ contract TreasuryBondToken is ERC3643, ERC3525, AccessControl {
     }
 
     function _calculateYieldFees(uint256 _yieldAmount) internal returns (uint256 netYield, uint256 feeCollected) {
-        // feeCollected = (_yieldAmount * PERCENTAGE_YIELD_FEE) / PERCENTAGE_PRECISION;
+        // feeCollected = (_yieldAmount * PERCENTAGE_YIELD_FEE) / C.PERCENTAGE_PRECISION;
         // netYield = _yieldAmount - feeCollected;
     }
 
@@ -428,10 +444,10 @@ contract TreasuryBondToken is ERC3643, ERC3525, AccessControl {
      */
     function _onlyValidSlot(uint256 _slot) internal pure {
         if (
-            _slot != SLOT_2Y &&
-            _slot != SLOT_5Y &&
-            _slot != SLOT_10Y &&
-            _slot != SLOT_30Y
+            _slot != C.SLOT_2Y &&
+            _slot != C.SLOT_5Y &&
+            _slot != C.SLOT_10Y &&
+            _slot != C.SLOT_30Y
         ) {
             revert TreasuryBondToken__InvalidSlot();
         }
@@ -488,10 +504,10 @@ contract TreasuryBondToken is ERC3643, ERC3525, AccessControl {
     // @audit-issue move to a separated risk managment contract
     function getLiabilitiesForAllSlots() external view returns (uint256[4] memory) {
         uint256[4] memory liabilities;
-        liabilities[0] = s_totalValuePerSlot[SLOT_2Y];
-        liabilities[1] = s_totalValuePerSlot[SLOT_5Y];
-        liabilities[2] = s_totalValuePerSlot[SLOT_10Y];
-        liabilities[3] = s_totalValuePerSlot[SLOT_30Y];
+        liabilities[0] = s_totalValuePerSlot[C.SLOT_2Y];
+        liabilities[1] = s_totalValuePerSlot[C.SLOT_5Y];
+        liabilities[2] = s_totalValuePerSlot[C.SLOT_10Y];
+        liabilities[3] = s_totalValuePerSlot[C.SLOT_30Y];
         return liabilities;
     }
 

@@ -62,7 +62,7 @@ contract ReservesOracle is IReservesOracle, ERC165, AccessControl {
             fiveYearUsdValue: _usdValues[1],
             tenYearUsdValue: _usdValues[2],
             thirtyYearUsdValue: _usdValues[3],
-            cashUsdValue: _cashUsd,
+            cashBufferUsdValue: _cashUsd,
             totalUsdValue: totalUsdValue,
             timestamp: _timestamp
         });
@@ -104,9 +104,9 @@ contract ReservesOracle is IReservesOracle, ERC165, AccessControl {
         return s_reservesResponse.totalUsdValue;
     }
 
-    function getCashUsdValue() external view returns (uint256) {
+    function getCashBufferUsdValue() external view returns (uint256) {
         if (_isStale(s_reservesResponse.timestamp)) revert ReservesOracle__DataIsStale();
-        return s_reservesResponse.cashUsdValue;
+        return s_reservesResponse.cashBufferUsdValue;
     }
 
     function getDecimals() public pure returns (uint8) {
