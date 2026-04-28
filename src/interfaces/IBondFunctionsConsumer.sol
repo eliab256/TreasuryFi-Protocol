@@ -20,7 +20,7 @@ interface IBondFunctionsConsumer {
         bytes err
     );
 
-    // Setters (onlyOwner)
+    // Setters
     function setAuthorizedCaller(address caller) external;
     function setSubscriptionId(uint64 subscriptionId) external;
 
@@ -34,6 +34,7 @@ interface IBondFunctionsConsumer {
     function getSubscriptionId() external view returns (uint64);
     function getGasLimit() external view returns (uint32);
     function getDonID() external view returns (bytes32);
-    function getSource() external view returns (string memory);
+    function getSource() external pure returns (string memory);
     function getAuthorizedCaller() external view returns (address);
+    function getBondOracle() external view returns (address);
 }

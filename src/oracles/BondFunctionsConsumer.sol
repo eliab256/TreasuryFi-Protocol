@@ -60,7 +60,7 @@ contract BondFunctionsConsumer is
         bytes32 _donID,
         uint32 _gasLimit,
         address _bondOracle
-    ) FunctionsClient(_router) Ownable() {
+    ) FunctionsClient(_router) {
         if (_bondOracle == address(0))
             revert BondFunctionsConsumer__ZeroAddress();
         i_donID = _donID;
@@ -120,61 +120,44 @@ contract BondFunctionsConsumer is
         if (s_lastRequestId != requestId) {
             revert BondFunctionsConsumer__UnexpectedRequestID(requestId); // Check if request IDs match
         }
+
         // Update the contract's state variables with the response and any errors
         s_lastResponse = response;
         s_lastError = err;
 
         uint256 timestamp = 0;
 
-        if (err.length == 0 && response.length > 0) {
+         if (err.length == 0 && response.length > 0) {
             (uint64[] memory values, uint256 ts) = abi.decode(
                 response,
                 (uint64[], uint256)
             );
+
             if (values.length < 4)
                 revert BondFunctionsConsumer__IncompleteResponse(values.length);
+
             timestamp = ts;
-        }
 
-        try IBondOracle(i_bondOracle).updateYields(response, err) {} catch (bytes memory oracleErr) {
-            emit OracleUpdateFailed(oracleErr);
+            try IBondOracle(i_bondOracle).updateYields(values, ts, err) {}
+            catch (bytes memory oracleErr) {
+                emit OracleUpdateFailed(oracleErr);
+            }
         } else {
-            try
-                IBondOracle(i_bondOracle).updateYields(
-                    [uint256(0), 0, 0, 0],
-                    0,
-                    err
-                )
-            {} catch {}
+            try IBondOracle(i_bondOracle).updateYields(new uint64[](0), 0, err) {}
+            catch {}
         }
 
-        // Emit an event to log the response
         emit Response(requestId, timestamp, response, err);
     }
 
     // --- Getters ---
-    function getLastRequestId() external view returns (bytes32) {
-        return s_lastRequestId;
-    }
-    function getLastResponse() external view returns (bytes memory) {
-        return s_lastResponse;
-    }
-    function getLastError() external view returns (bytes memory) {
-        return s_lastError;
-    }
-    function getSubscriptionId() external view returns (uint64) {
-        return s_subscriptionId;
-    }
-    function getAuthorizedCaller() external view returns (address) {
-        return s_authorizedCaller;
-    }
-    function getGasLimit() external view returns (uint32) {
-        return i_gasLimit;
-    }
-    function getDonID() external view returns (bytes32) {
-        return i_donID;
-    }
-    function getSource() external pure returns (string memory) {
-        return source;
-    }
+    function getLastRequestId() external view returns (bytes32) { return s_lastRequestId; }
+    function getLastResponse() external view returns (bytes memory) { return s_lastResponse; }
+    function getLastError() external view returns (bytes memory) { return s_lastError; }
+    function getSubscriptionId() external view returns (uint64) { return s_subscriptionId; }
+    function getAuthorizedCaller() external view returns (address) { return s_authorizedCaller; }
+    function getGasLimit() external view returns (uint32) { return i_gasLimit; }
+    function getDonID() external view returns (bytes32) { return i_donID; }
+    function getSource() external pure returns (string memory) { return source; }
+    function getBondOracle() external view returns (address) { return i_bondOracle; }
 }

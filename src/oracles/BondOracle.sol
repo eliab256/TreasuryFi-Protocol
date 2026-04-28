@@ -15,36 +15,41 @@ contract BondOracle is IBondOracle, ERC165, AccessControl {
     address internal s_functionsConsumer;
 
     constructor(address _functionsConsumer) {
+        if (_functionsConsumer == address(0))
+            revert BondOracle__ZeroAddress();
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(UPDATER_ROLE, _functionsConsumer);
         s_functionsConsumer = _functionsConsumer;
     }
 
-    function updateYield(
-        bytes memory response,
-        bytes memory err
+    function updateYields(
+        uint64[] memory _values,
+        uint256 _timestamp,
+        bytes memory _err
     ) external onlyRole(UPDATER_ROLE) {
-        if (err.length > 0) {
-            emit YieldUpdateFailed(err);
+        if (_err.length > 0) {
+            emit YieldUpdateFailed(_err);
             return;
         }
-        (uint64[] memory values, uint256 timestamp) = abi.decode(
-            response,
-            (uint64[], uint256)
-        );
+
+        // lunghezza già verificata nel Consumer, doppio check difensivo
+        if (_values.length < 4)
+            revert BondOracle__IncompleteResponse(_values.length);
+
         s_bondYieldsResponse = BondYieldsResponse({
-            twoYearYield: values[0],
-            fiveYearYield: values[1],
-            tenYearYield: values[2],
-            thirtyYearYield: values[3],
-            timestamp: timestamp
+            twoYearYield: _values[0],
+            fiveYearYield: _values[1],
+            tenYearYield: _values[2],
+            thirtyYearYield: _values[3],
+            timestamp: _timestamp
         });
+
         emit YieldUpdated(
-            values[0],
-            values[1],
-            values[2],
-            values[3],
-            timestamp
+            _values[0],
+            _values[1],
+            _values[2],
+            _values[3],
+            _timestamp
         );
     }
 
