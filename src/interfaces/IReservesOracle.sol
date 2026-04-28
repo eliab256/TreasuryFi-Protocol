@@ -12,20 +12,32 @@ interface IReservesOracle {
 
     // Events
 
+
     event UsdValueUpdated(
         uint256 twoYearUsdValue,
         uint256 fiveYearUsdValue,
         uint256 tenYearUsdValue,
         uint256 thirtyYearUsdValue,
+        uint256 cashUsdValue,
+        uint256 totalUsdValue,
         uint256 timestamp
     );
     event UsdValueUpdateFailed(bytes err);
 
     // Actions (onlyRole UPDATER_ROLE)
-    function updateUsdValue(bytes memory response, bytes memory err) external;
+    function updateUsdValues(
+        uint256[4] memory usdValues,
+        uint256 cashUsd,
+        uint256 timestamp,
+        bytes memory signature,
+        bytes32 hash,
+        bytes memory err
+    ) external;
 
     // Getters
-    function getUsdValue(uint256 slot) external view returns (uint256);
+    function getReserveUsdValue(uint256 slot) external view returns (uint256);
+    function getTotalUsdValue() external view returns (uint256);
+    function getCashUsdValue() external view returns (uint256);
     function isStale() external view returns (bool);
     function getLastUpdatedTimestamp() external view returns (uint256);
     function getFunctionsConsumer() external view returns (address);

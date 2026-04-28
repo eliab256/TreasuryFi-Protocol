@@ -33,7 +33,7 @@ interface IReservesFunctionsConsumer {
     function getSubscriptionId() external view returns (uint64);
     function getGasLimit() external view returns (uint32);
     function getDonID() external view returns (bytes32);
-    function getSource() external view returns (string memory);
+    function getSource() external pure returns (string memory);
     function getAuthorizedCaller() external view returns (address);
     function getReservesOracle() external view returns (address);
 }

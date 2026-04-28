@@ -6,7 +6,7 @@ import {IBondOracle} from "../interfaces/IBondOracle.sol";
 import {
     FunctionsClient
 } from "@chainlink/contracts/src/v0.8/functions/v1_3_0/FunctionsClient.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {
     FunctionsRequest
 } from "@chainlink/contracts/src/v0.8/functions/v1_0_0/libraries/FunctionsRequest.sol";
@@ -15,9 +15,12 @@ import {BondYieldsResponse} from "../types.sol";
 contract BondFunctionsConsumer is
     IBondFunctionsConsumer,
     FunctionsClient,
-    Ownable
+    AccessControl
 {
     using FunctionsRequest for FunctionsRequest.Request;
+
+    //roles
+    bytes32 public constant UPDATER_ROLE = keccak256("UPDATER_ROLE");
 
     // Callback gas limit
     uint32 internal immutable i_gasLimit;
@@ -63,17 +66,18 @@ contract BondFunctionsConsumer is
         i_donID = _donID;
         i_gasLimit = _gasLimit;
         i_bondOracle = _bondOracle;
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(UPDATER_ROLE, msg.sender);       
     }
 
     /// @notice Sets the authorized caller (BondAutomation) — only owner
-    // @audit-issue usare access control
-    function setAuthorizedCaller(address _caller) external onlyOwner {
+    function setAuthorizedCaller(address _caller) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (_caller == address(0)) revert BondFunctionsConsumer__ZeroAddress();
         s_authorizedCaller = _caller;
         emit AuthorizedCallerSet(_caller);
     }
 
-    function setSubscriptionId(uint64 _subscriptionId) external onlyOwner {
+    function setSubscriptionId(uint64 _subscriptionId) external onlyRole(DEFAULT_ADMIN_ROLE) {
         s_subscriptionId = _subscriptionId;
         emit SubscriptionIdSet(_subscriptionId);
     }
@@ -82,13 +86,12 @@ contract BondFunctionsConsumer is
      * @notice Sends an HTTP request for character information
      * @return requestId The ID of the request
      */
-    function sendRequest() external returns (bytes32 requestId) {
-        if (msg.sender != s_authorizedCaller) {
-            revert BondFunctionsConsumer__NotAuthorized();
-        }
+    function sendRequest() external onlyRole(UPDATER_ROLE) returns (bytes32 requestId) {
+
         if (s_subscriptionId == 0) {
             revert BondFunctionsConsumer__InvalidSubscriptionId();
         }
+
         FunctionsRequest.Request memory req;
         req.initializeRequestForInlineJavaScript(source); // Initialize the request with JS code
 
@@ -121,7 +124,7 @@ contract BondFunctionsConsumer is
         s_lastResponse = response;
         s_lastError = err;
 
-        uint256 timestampResponse = 0;
+        uint256 timestamp = 0;
 
         if (err.length == 0 && response.length > 0) {
             (uint64[] memory values, uint256 ts) = abi.decode(
@@ -130,16 +133,23 @@ contract BondFunctionsConsumer is
             );
             if (values.length < 4)
                 revert BondFunctionsConsumer__IncompleteResponse(values.length);
-            timestampResponse = ts;
+            timestamp = ts;
         }
 
-        try IBondOracle(i_bondOracle).updateYield(response, err) {
-            // success
-        } catch (bytes memory oracleErr) {
+        try IBondOracle(i_bondOracle).updateYields(response, err) {} catch (bytes memory oracleErr) {
             emit OracleUpdateFailed(oracleErr);
+        } else {
+            try
+                IBondOracle(i_bondOracle).updateYields(
+                    [uint256(0), 0, 0, 0],
+                    0,
+                    err
+                )
+            {} catch {}
         }
+
         // Emit an event to log the response
-        emit Response(requestId, timestampResponse, response, err);
+        emit Response(requestId, timestamp, response, err);
     }
 
     // --- Getters ---

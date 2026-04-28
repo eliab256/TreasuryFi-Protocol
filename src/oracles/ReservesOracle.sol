@@ -28,60 +28,58 @@ contract ReservesOracle is IReservesOracle, ERC165, AccessControl {
     }
 
 
-    function updateUsdValue(
-        bytes memory response,
-        bytes memory err
+   function updateUsdValues(
+        uint256[4] memory _usdValues,
+        uint256 _cashUsd,
+        uint256 _timestamp,
+        bytes memory _signature,
+        bytes32 _hash,
+        bytes memory _err
     ) external onlyRole(UPDATER_ROLE) {
-        if (err.length > 0) {
-            emit UsdValueUpdateFailed(err);
+        if (_err.length > 0) {
+            emit UsdValueUpdateFailed(_err);
             return;
         }
 
-        (
-        uint256[4] memory usdValues,
-            uint256 totalUsd,
-            bytes memory signature,
-            bytes32 hash,
-            uint256 timestamp
-        ) = abi.decode(
-            response,
-            (uint256[4], uint256, bytes, bytes32, uint256)
-        );
-
-        address recovered = ECDSA.recover(hash, signature);
+        // FIX 3: verifica firma sui dati già decodificati
+        address recovered = ECDSA.recover(_hash, _signature);
         if (recovered != s_reservesSigner)
             revert ReservesOracle__InvalidSignature(recovered);
 
-        uint256 computedSum =
-            usdValues[0] +
-            usdValues[1] +
-            usdValues[2] +
-            usdValues[3];
+        // somma dei bucket bond
+        uint256 bucketsSum =
+            _usdValues[0] +
+            _usdValues[1] +
+            _usdValues[2] +
+            _usdValues[3];
 
-        // tolerance for onchain vs offchain summation discrepancies, set to 1e6 (0.000001 in 6 decimals) to allow for minor rounding differences
-        if(computedSum > totalUsd + 1e6){
-            revert ReservesOracle__BucketMismatchVsTotal();
-        }
+        // totale riserve = bond buckets + liquidità cash
+        uint256 totalUsdValue = bucketsSum + _cashUsd;
 
+        // @audit-issue: aggiungere cashUsdValue e totalUsdValue alla struct ReservesResponse in types.sol
         s_reservesResponse = ReservesResponse({
-            twoYearUsdValue: usdValues[0],
-            fiveYearUsdValue: usdValues[1],
-            tenYearUsdValue: usdValues[2],
-            thirtyYearUsdValue: usdValues[3],
-            timestamp: timestamp
+            twoYearUsdValue: _usdValues[0],
+            fiveYearUsdValue: _usdValues[1],
+            tenYearUsdValue: _usdValues[2],
+            thirtyYearUsdValue: _usdValues[3],
+            cashUsdValue: _cashUsd,
+            totalUsdValue: totalUsdValue,
+            timestamp: _timestamp
         });
 
         emit UsdValueUpdated(
-            usdValues[0],
-            usdValues[1],
-            usdValues[2],
-            usdValues[3],
-            totalUsd,
-            timestamp
+            _usdValues[0],
+            _usdValues[1],
+            _usdValues[2],
+            _usdValues[3],
+            _cashUsd,
+            totalUsdValue,
+            _timestamp
         );
     }
 
-    function getUsdValue(uint256 _slot) external view returns (uint256) {
+
+    function getReserveUsdValue(uint256 _slot) external view returns (uint256) {
         ReservesResponse memory usdValues = s_reservesResponse;
         if (_isStale(usdValues.timestamp)) revert ReservesOracle__DataIsStale();
 
@@ -99,6 +97,16 @@ contract ReservesOracle is IReservesOracle, ERC165, AccessControl {
 
     function _isStale(uint256 _timestamp) internal view returns (bool) {
         return (block.timestamp - _timestamp) > STALENESS_THRESHOLD;
+    }
+
+    function getTotalUsdValue() external view returns (uint256) {
+        if (_isStale(s_reservesResponse.timestamp)) revert ReservesOracle__DataIsStale();
+        return s_reservesResponse.totalUsdValue;
+    }
+
+    function getCashUsdValue() external view returns (uint256) {
+        if (_isStale(s_reservesResponse.timestamp)) revert ReservesOracle__DataIsStale();
+        return s_reservesResponse.cashUsdValue;
     }
 
     function getDecimals() public pure returns (uint8) {

@@ -20,11 +20,15 @@ contract ReservesFunctionsConsumer is
 {
     using FunctionsRequest for FunctionsRequest.Request;
 
+    //roles
     bytes32 public constant UPDATER_ROLE = keccak256("UPDATER_ROLE");
+
+    // callback gas limit
     uint32 internal immutable i_gasLimit;
     bytes32 internal immutable i_donID;
     address internal immutable i_reservesOracle;
 
+    // State variables (all internal)
     bytes32 internal s_lastRequestId;
     bytes internal s_lastResponse;
     bytes internal s_lastError;
@@ -32,7 +36,7 @@ contract ReservesFunctionsConsumer is
     address internal s_authorizedCaller;
 
     // @audit-issue modificare l'url con quello definitivo del server SPV
-    string internal constant source =
+     string internal constant source =
         'const url = "https://your-spv.vercel.app/api/usdValues";'
         "const response = await Functions.makeHttpRequest({ url });"
         "const decimals = 8;"
@@ -44,15 +48,15 @@ contract ReservesFunctionsConsumer is
         "const encoded = Functions.encodeString(JSON.stringify(data));"
         "const hash = Functions.keccak256(encoded);"
         "return Functions.encodeAbi("
-        '  ["uint256[4]", "uint256", "bytes", "bytes32"],'
+        '  ["uint256[4]", "uint256", "uint256", "bytes", "bytes32"],'
         "  ["
         "    ["
-        '              Math.round(data.usdValue_by_bucket["2Y"]  * 10 ** decimals),'
-        '              Math.round(data.usdValue_by_bucket["5Y"]  * 10 ** decimals),'
-        '              Math.round(data.usdValue_by_bucket["10Y"] * 10 ** decimals),'
-        '              Math.round(data.usdValue_by_bucket["30Y"] * 10 ** decimals),'
+        '      Math.round(data.usdValue_by_bucket["2Y"]  * 10 ** decimals),'
+        '      Math.round(data.usdValue_by_bucket["5Y"]  * 10 ** decimals),'
+        '      Math.round(data.usdValue_by_bucket["10Y"] * 10 ** decimals),'
+        '      Math.round(data.usdValue_by_bucket["30Y"] * 10 ** decimals)'
         "    ],"
-        "    Math.round(data.cash_usd * 10 ** decimals)," 
+        "    Math.round(data.cash_usd * 10 ** decimals),"
         "    data.timestamp,"
         "    signature,"
         "    hash"
@@ -107,9 +111,8 @@ contract ReservesFunctionsConsumer is
         s_lastResponse = response;
         s_lastError = err;
 
-        uint256 timestampResponse = 0;
+        uint256 timestamp = 0;
 
-        
         if (err.length == 0 && response.length > 0) {
             (
                 uint256[4] memory usdValues,
@@ -124,7 +127,6 @@ contract ReservesFunctionsConsumer is
 
             timestamp = ts;
 
-            // forward structured data to oracle
             try
                 IReservesOracle(i_reservesOracle).updateUsdValues(
                     usdValues,
@@ -138,10 +140,9 @@ contract ReservesFunctionsConsumer is
                 emit OracleUpdateFailed(oracleErr);
             }
         } else {
-            // forward error anyway
             try
                 IReservesOracle(i_reservesOracle).updateUsdValues(
-                    new uint256[](0),
+                    [uint256(0), 0, 0, 0],
                     0,
                     0,
                     "",
@@ -155,31 +156,15 @@ contract ReservesFunctionsConsumer is
     }
 
     // --- Getters ---
-    function getLastRequestId() external view returns (bytes32) {
-        return s_lastRequestId;
-    }
-    function getLastResponse() external view returns (bytes memory) {
-        return s_lastResponse;
-    }
-    function getLastError() external view returns (bytes memory) {
-        return s_lastError;
-    }
-    function getSubscriptionId() external view returns (uint64) {
-        return s_subscriptionId;
-    }
-    function getAuthorizedCaller() external view returns (address) {
-        return s_authorizedCaller;
-    }
-    function getGasLimit() external view returns (uint32) {
-        return i_gasLimit;
-    }
-    function getDonID() external view returns (bytes32) {
-        return i_donID;
-    }
-    function getSource() external pure returns (string memory) {
-        return source;
-    }
-    function getReservesOracle() external view returns (address) {
-        return i_reservesOracle;
-    }
+    function getLastRequestId() external view returns (bytes32) { return s_lastRequestId; }
+    function getLastResponse() external view returns (bytes memory) { return s_lastResponse; }
+    function getLastError() external view returns (bytes memory) { return s_lastError; }
+    function getSubscriptionId() external view returns (uint64) { return s_subscriptionId; }
+    function getAuthorizedCaller() external view returns (address) { return s_authorizedCaller; }
+    function getGasLimit() external view returns (uint32) { return i_gasLimit; }
+    function getDonID() external view returns (bytes32) { return i_donID; }
+    function getSource() external pure returns (string memory) { return source; }
+    function getReservesOracle() external view returns (address) { return i_reservesOracle; }
+
+   
 }
