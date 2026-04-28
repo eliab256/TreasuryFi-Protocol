@@ -2,30 +2,51 @@
 
 pragma solidity ^0.8.0;
 
-import {IToken} from "@t-rex/token/IToken.sol";
-import {IIdentityRegistry} from "@t-rex/identity-registry/IIdentityRegistry.sol";
+import {IIdentityRegistry} from "@t-rex/registry/interface/IIdentityRegistry.sol";
 import {IModularCompliance} from "@t-rex/compliance/modular/IModularCompliance.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
-contract ERC3643 is IToken {
+abstract contract ERC3643 is Ownable {
+
+
+    // Eventi
+    event IdentityRegistryAdded(address indexed identityRegistry);
+    event AddressFrozen(address indexed wallet, bool indexed frozen, address indexed owner);
+    event TokenValueFrozen(uint256 indexed tokenId, uint256 amount);
+    event TokenValueUnfrozen(uint256 indexed tokenId, uint256 amount);
+    event ComplianceAdded(address indexed compliance);
+    event Paused(address indexed account); 
+    event Unpaused(address indexed account); 
+    event UpdatedTokenInformation(string name, string symbol, uint8 decimals, string version, address onchainID); 
+
+    // Custom error
+    error ERC3643__InvalidName();
+    error ERC3643__InvalidSymbol();
+    error ERC3643__InvalidDecimals();
+    error ERC3643__ZeroAddress();
+    error ERC3643__TokenPaused();
+    error ERC3643__TokenNotPaused();
+    error ERC3643__AmountExceedsAvailableValue();
+    error ERC3643__AmountExceedsAvailableFrozen();
 
     /// @dev Token information
     string internal   s_tokenName;
     string internal  s_tokenSymbol;
     uint8 internal immutable i_tokenDecimals;
     address internal s_tokenOnchainID;
-    string internal constant _TOKEN_VERSION = "4.1.3";
+    string internal constant TOKEN_VERSION = "4.1.3";
 
     /// @dev Variables of freeze and pause functions
     mapping(address => bool) internal s_frozenWallets;
-    mapping(address => uint256) internal s_frozenTokens;
+    // mapping: tokenId => frozen value
+    mapping(uint256 => uint256) private s_frozenValues;
 
     bool internal s_tokenPaused = false;
 
     /// @dev Identity Registry contract used by the onchain validator system
     IIdentityRegistry internal s_tokenIdentityRegistry;
 
-        /// @dev Compliance contract linked to the onchain validator system
+    /// @dev Compliance contract linked to the onchain validator system
     IModularCompliance internal s_tokenCompliance;
 
     constructor(
@@ -60,61 +81,47 @@ contract ERC3643 is IToken {
         emit IdentityRegistryAdded(_identityRegistry);
     }
 
-    /**
-     *  @dev See {IToken-setName}.
-     */
-    function setName(string calldata _name) external override onlyOwner {
+    function setName(string calldata _name) external onlyOwner {
           if (bytes(_name).length == 0) revert ERC3643__InvalidName();
         s_tokenName = _name;
-        emit UpdatedTokenInformation(s_tokenName, s_tokenSymbol, i_tokenDecimals, _TOKEN_VERSION, s_tokenOnchainID);
+        emit UpdatedTokenInformation(s_tokenName, s_tokenSymbol, i_tokenDecimals, TOKEN_VERSION, s_tokenOnchainID);
     }
 
-    /**
-     *  @dev See {IToken-setSymbol}.
-     */
-    function setSymbol(string calldata _symbol) external override onlyOwner {
+    function setSymbol(string calldata _symbol) external onlyOwner {
         if (bytes(_symbol).length == 0) revert ERC3643__InvalidSymbol();
         s_tokenSymbol = _symbol;
-        emit UpdatedTokenInformation(s_tokenName, s_tokenSymbol, i_tokenDecimals, _TOKEN_VERSION, s_tokenOnchainID);
+        emit UpdatedTokenInformation(s_tokenName, s_tokenSymbol, i_tokenDecimals, TOKEN_VERSION, s_tokenOnchainID);
     }
 
-    /**
-     *  @dev See {IToken-setOnchainID}.
-     *  if _onchainID is set at zero address it means no ONCHAINID is bound to this token
-     */
-    function setOnchainID(address _onchainID) external override onlyOwner {
+    function setOnchainID(address _onchainID) external onlyOwner {
         s_tokenOnchainID = _onchainID;
-        emit UpdatedTokenInformation(_tokenName, _tokenSymbol, _tokenDecimals, _TOKEN_VERSION, _tokenOnchainID);
+        emit UpdatedTokenInformation(s_tokenName, s_tokenSymbol, i_tokenDecimals, TOKEN_VERSION, s_tokenOnchainID);
     }
 
-    /**
-     *  @dev See {IToken-pause}.
-     */
-    function pause() external override onlyAgent whenNotPaused {
+    function pause() external onlyOwner {
+        _whenNotPaused();
         s_tokenPaused = true;
         emit Paused(msg.sender);
     }
 
-    /**
-     *  @dev See {IToken-unpause}.
-     */
-    function unpause() external override onlyAgent whenPaused {
-        _tokenPaused = false;
+    function unpause() external onlyOwner {
+        _whenPaused();
+        s_tokenPaused = false;
         emit Unpaused(msg.sender);
     }
 
 
-    function setAddressFrozen(address _userAddress, bool _freeze) external onlyRole(OWNER_ROLE) {
+    function setAddressFrozen(address _userAddress, bool _freeze) external onlyOwner {
          _setAddressFrozen(_userAddress, _freeze);
     }
 
 
-    function freezePartialTokens(address _userAddress, uint256 _amount) external onlyRole(OWNER_ROLE) {
-        _freezPartialTokens(_userAddress, _amount);
+    function freezePartialTokens(uint256 _tokenId, uint256 _amount) external onlyOwner {
+        _freezePartialToken(_tokenId, _amount);
     }
 
-    function unfreezePartialTokens(address _userAddress, uint256 _amount) external onlyRole(OWNER_ROLE) {
-        _unfreezePartialTokens(_userAddress, _amount);
+    function unfreezePartialTokens(uint256 _tokenId, uint256 _amount) external onlyOwner {
+        _unfreezePartialToken(_tokenId, _amount);
     }
 
     function batchSetAddressFrozen(address[] calldata _userAddresses, bool[] calldata _freeze) external {
@@ -124,45 +131,47 @@ contract ERC3643 is IToken {
     }
 
 
-    function batchFreezePartialTokens(address[] calldata _userAddresses, uint256[] calldata _amounts) external {
-        for (uint256 i = 0; i < _userAddresses.length; i++) {
-            _freezePartialTokens(_userAddresses[i], _amounts[i]);
+    function batchFreezePartialTokens(uint256[] calldata _tokenId, uint256[] calldata _amounts) external {
+        for (uint256 i = 0; i < _tokenId.length; i++) {
+            _freezePartialToken(_tokenId[i], _amounts[i]);
         }
     }
 
-    /**
-     *  @dev See {IToken-batchUnfreezePartialTokens}.
-     */
-    function batchUnfreezePartialTokens(address[] calldata _userAddresses, uint256[] calldata _amounts) external {
-        for (uint256 i = 0; i < _userAddresses.length; i++) {
-            unfreezePartialTokens(_userAddresses[i], _amounts[i]);
+
+    function batchUnfreezePartialTokens(uint256[] calldata _tokenId, uint256[] calldata _amounts) external {
+        for (uint256 i = 0; i < _tokenId.length; i++) {
+            _unfreezePartialToken(_tokenId[i], _amounts[i]);
         }
     }
 
 
     function _setAddressFrozen(address _userAddress, bool _freeze) internal {
-        s_frozen[_userAddress] = _freeze;
+        s_frozenWallets[_userAddress] = _freeze;
 
         emit AddressFrozen(_userAddress, _freeze, msg.sender);
     }
 
-    function _freezPartialTokens(address _userAddress, uint256 _amount) internal {
-        uint256 balance = balanceOf(_userAddress);
-        uint256 frozenTokens = s_frozenTokens[_userAddress];
-        if (balance < frozenTokens + _amount) {
-            revert ERC3643__AmountExceedsAvailableBalance();
+    function _freezePartialToken(uint256 _tokenId, uint256 _amount) internal {
+        uint256 tokenValue  = balanceOf(_tokenId);        // valore del token
+        uint256 frozenValue = s_frozenValues[_tokenId];
+
+        if (tokenValue < frozenValue + _amount) {
+            revert ERC3643__AmountExceedsAvailableValue();
         }
-        s_frozenTokens[_userAddress] = frozenTokens + (_amount);
-        emit TokensFrozen(_userAddress, _amount);
+
+        s_frozenValues[_tokenId] = frozenValue + _amount;
+        emit TokenValueFrozen(_tokenId, _amount);
     }
 
-    function _unfreezePartialTokens(address _userAddress, uint256 _amount) internal {
-        uint256 frozenTokens = s_frozenTokens[_userAddress];
-        if (frozenTokens < _amount) {
-            revert ERC3643__AmountShouldBeLessOrEqualToFrozen();
+    function _unfreezePartialToken(uint256 _tokenId, uint256 _amount) internal {
+        uint256 frozenValue = s_frozenValues[_tokenId];
+
+        if (frozenValue < _amount) {
+            revert ERC3643__AmountExceedsAvailableFrozen();
         }
-        s_frozenTokens[_userAddress] = frozenTokens - (_amount);
-        emit TokensUnfrozen(_userAddress, _amount);
+
+        s_frozenValues[_tokenId] = frozenValue - _amount;
+        emit TokenValueUnfrozen(_tokenId, _amount);
     }
 
     /**
@@ -185,67 +194,67 @@ contract ERC3643 is IToken {
         }
     }
 
-    /**
-     *  @dev See {IToken-setCompliance}.
-     */
-    function setCompliance(address _compliance) public override onlyOwner {
-        if (address(_tokenCompliance) != address(0)) {
-            _tokenCompliance.unbindToken(address(this));
+    function setCompliance(address _compliance) public  onlyOwner {
+        if (address(s_tokenCompliance) != address(0)) {
+            s_tokenCompliance.unbindToken(address(this));
         }
         s_tokenCompliance = IModularCompliance(_compliance);
         s_tokenCompliance.bindToken(address(this));
         emit ComplianceAdded(_compliance);
     }
 
-    /**
-     *  @dev See {IToken-compliance}.
-     */
-    function compliance() external view override returns (IModularCompliance) {
+    function compliance() external view  returns (IModularCompliance) {
         return s_tokenCompliance;
     }
 
-    /**
-     *  @dev See {IToken-paused}.
-     */
-    function paused() external view override returns (bool) {
+    function paused() external view returns (bool) {
         return s_tokenPaused;
     }
 
-
-    /**
-     *  @dev See {IToken-decimals}.
-     */
-    function decimals() external view override returns (uint8) {
+    function decimals() external view returns (uint8) {
         return i_tokenDecimals;
     }
 
-    /**
-     *  @dev See {IToken-name}.
-     */
-    function name() external view override returns (string memory) {
+    function name() external view returns (string memory) {
         return s_tokenName;
     }
 
-    /**
-     *  @dev See {IToken-onchainID}.
-     */
-    function onchainID() external view override returns (address) {
+    function onchainID() external view returns (address) {
         return s_tokenOnchainID;
     }
 
-    /**
-     *  @dev See {IToken-symbol}.
-     */
-    function symbol() external view override returns (string memory) {
+    function symbol() external view returns (string memory) {
         return s_tokenSymbol;
     }
 
-    /**
-     *  @dev See {IToken-version}.
-     */
-    function version() external pure override returns (string memory) {
-        return _TOKEN_VERSION;
+    function version() external pure returns (string memory) {
+        return TOKEN_VERSION;
     }
 
+    function getFrozenValue(uint256 _tokenId) external view returns (uint256) {
+    return s_frozenValues[_tokenId];
+    }
+
+    function getAvailableValue(uint256 _tokenId) external view returns (uint256) {
+        return balanceOf(_tokenId) - s_frozenValues[_tokenId];
+    }
+
+    function _beforeValueTransfer(address _from,
+        address _to,
+        uint256 _fromTokenId,
+        uint256 _toTokenId,
+        uint256 _slot,
+        uint256 _value) internal {
+            
+    }
+
+    function _afterValueTransfer(address _from,
+        address _to,
+        uint256 _fromTokenId,
+        uint256 _toTokenId,
+        uint256 _slot,
+        uint256 _value) internal {
+            
+    }
 
 }

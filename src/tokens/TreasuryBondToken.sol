@@ -2,6 +2,7 @@
 pragma solidity ^0.8.0;
 
 import {ERC3525} from "./ERC3525.sol";
+import {ERC3643} from "./ERC3643.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {
@@ -32,6 +33,17 @@ contract TreasuryBondToken is ERC3525, AccessControl {
     event TokensFrozen(address indexed user, uint256 amount);
     event TokensUnfrozen(address indexed user, uint256 amount);
 
+    // Nuovi eventi
+    event PositionOpened(address indexed user, uint256 indexed tokenId, uint256 slot, uint256 value, uint256 feeCollected);
+    event PositionClosed(address indexed user, uint256 indexed tokenId, uint256 slot, uint256 value, uint256 feeCollected);
+    event PartialPositionClosed(address indexed user, uint256 indexed tokenId, uint256 slot, uint256 valueBurned, uint256 feeCollected);
+    event YieldClaimed(address indexed user, uint256 indexed tokenId, uint256 yieldAmount, uint256 feeCollected);
+    event ForceTransfer(address indexed from, address indexed to, uint256 indexed tokenId, uint256 value);
+    event EntryFeeCollected(address indexed user, uint256 amount);
+    event ExitFeeCollected(address indexed user, uint256 amount);
+    event YieldFeeCollected(address indexed user, uint256 amount);
+    event IdentityRegistrySet(address indexed identityRegistry);
+
     error TreasuryBondToken__InvalidSlot();
     error TreasuryBondToken__FunctionDisabled();
     error TreasuryBondToken__NotApprovedOrOwner();
@@ -45,6 +57,10 @@ contract TreasuryBondToken is ERC3525, AccessControl {
     error TreasuryBondToken__WalletNotFrozen();
     error TreasuryBondToken__AmountExceedsAvailableBalance();
     error TreasuryBondToken__AmountShouldBeLessOrEqualToFrozen();
+
+    // Nuovi custom error
+    error TreasuryBondToken__ReceiverFrozen();
+    error TreasuryBondToken__SenderFrozen();
 
     uint256 public constant SLOT_2Y = 1; // 2-Year Treasury exposure
     uint256 public constant SLOT_5Y = 2; // 5-Year Treasury exposure
@@ -86,6 +102,17 @@ contract TreasuryBondToken is ERC3525, AccessControl {
         _;
     }
 
+    modifier whenNotPaused() {
+        ERC3643._whenNotPaused();
+        _;
+    }
+
+    modifier whenPaused(){
+        ERC3643._whenPaused();
+        _;
+    }
+
+
     constructor(
         string memory _name,
         string memory _symbol,
@@ -96,7 +123,7 @@ contract TreasuryBondToken is ERC3525, AccessControl {
         address _reservesOracle,
         address _bondOracle,
         address _feesCollector
-    ) ERC3525(_name, _symbol, _decimals) {
+    ) ERC3525(_name, _symbol, _decimals) ERC3643(_name, _symbol, _decimals, address(this), _identityRegistry, address(0)) {
         // Checks
         if (
             _usdcAddress == address(0) ||
@@ -149,7 +176,7 @@ contract TreasuryBondToken is ERC3525, AccessControl {
         address _mintTo,
         uint256 _slot,
         uint256 _value
-    ) public onlyValidSlot(_slot) {
+    ) public onlyValidSlot(_slot) whenNotpaused{
         // @audit-issue implement openNewPosition function
         if (_value < i_minimumDepositAmount) {
             revert TreasuryBondToken__InvalidValue();
@@ -165,7 +192,7 @@ contract TreasuryBondToken is ERC3525, AccessControl {
         // 6. _afterValueTransfer hook to update internal accounting
     }
 
-    function closePosition(uint256 _tokenId) public {
+    function closePosition(uint256 _tokenId) public whenNotpaused{
         if (!_isApprovedOrOwner(_msgSender(), _tokenId)) {
             revert TreasuryBondToken__NotApprovedOrOwner();
         }
@@ -184,7 +211,7 @@ contract TreasuryBondToken is ERC3525, AccessControl {
     function closePartialPosition(
         uint256 _tokenId,
         uint256 _valueToBurn
-    ) public {
+    ) public whenNotpaused{
         if (!_isApprovedOrOwner(_msgSender(), _tokenId)) {
             revert TreasuryBondToken__NotApprovedOrOwner();
         }
@@ -218,7 +245,7 @@ contract TreasuryBondToken is ERC3525, AccessControl {
         uint256 _fromTokenId,
         address _to,
         uint256 _value
-    ) public payable override etherNotAccepted returns (uint256 newTokenId) {
+    ) public payable override etherNotAccepted whenNotPaused returns (uint256 newTokenId) {
         // @audit-issue implement T-REX checks
         newTokenId = super.transferFrom(_fromTokenId, _to, _value);
     }
@@ -227,7 +254,7 @@ contract TreasuryBondToken is ERC3525, AccessControl {
         address _from,
         address _to,
         uint256 _tokenId
-    ) public payable override etherNotAccepted {
+    ) public payable override etherNotAccepted whenNotPaused{
         // @audit-issue implement checks
         // T-rex checks
         super.transferFrom(_from, _to, _tokenId);
@@ -238,7 +265,7 @@ contract TreasuryBondToken is ERC3525, AccessControl {
         address _to,
         uint256 _tokenId,
         bytes memory _data
-    ) public payable override etherNotAccepted {
+    ) public payable override etherNotAccepted whenNotPaused {
         // @audit-issue implement checks
         // T-rex checks
         super.safeTransferFrom(_from, _to, _tokenId, _data);
@@ -248,13 +275,13 @@ contract TreasuryBondToken is ERC3525, AccessControl {
         address _from,
         address _to,
         uint256 _tokenId
-    ) public payable override etherNotAccepted {
+    ) public payable override etherNotAccepted whenNotPaused {
         // @audit-issue implement checks
         // T-rex checks
         super.safeTransferFrom(_from, _to, _tokenId, "");
     }
 
-    function claimYield(uint256 _tokenId) public {
+    function claimYield(uint256 _tokenId) public whenNotPaused {
         // @audit-issue implement claimYield function
         // verifica che msg.sender sia owner o approved del token
         // verifica che sia passato abbastanza tempo dall'ultimo claim (es. 30 gg)
@@ -266,7 +293,7 @@ contract TreasuryBondToken is ERC3525, AccessControl {
     }
 
 
-        function _mint(
+    function _mint(
             address _mintTo,
             uint256 _tokenId,
             uint256 _slot,
@@ -275,9 +302,9 @@ contract TreasuryBondToken is ERC3525, AccessControl {
             // aggiornare l' accounting del tot value per slot prima di mintare
             // @audit-info questo aggiornamento va fatto dentro _beforeValueTransfer o _afterValueTransfer? va valutato se è necessario distinguere tra mint, burn e transfer
             super._mint(_mintTo, _tokenId, _slot, _value);
-        }
+    }
 
-        function _claimYield(uint256 _tokenId) internal {
+    function _claimYield(uint256 _tokenId) internal {
         // 1. Recupera lo slot, il valore del token e calcola gli interessi maturati in base al tempo trascorso
         // 2. Trasferisci gli interessi maturati in USDC al possessore del token
         // si può usare la func public che avrà un intervallo di tempo minimo tra due claim per evitare abusi
@@ -476,6 +503,4 @@ contract TreasuryBondToken is ERC3525, AccessControl {
         return s_frozenTokens[_wallet];
     }
 
-    function identityRegistry() external view returns (IIdentityRegistry) {
-        return s_tokenIdentityRegistry;
 }

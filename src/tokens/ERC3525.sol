@@ -28,6 +28,16 @@ contract ERC3525 is Context, IERC3525, IERC721Enumerable {
     error ERC3525__ApproveCallerIsNotOwnerNorApprovedForAll();
     error ERC3525__TransferCallerIsNotOwnerNorApproved();
 
+    // Nuovi custom error
+    error ERC3525__TransferRejectedByERC3525Receiver();
+    error ERC3525__TransferToNonERC721ReceiverImplementer();
+    error ERC3525__TransferToNonERC3525ReceiverImplementer();
+
+    // Nuovi eventi
+    event ReceivedERC3525(address indexed operator, uint256 indexed fromTokenId, uint256 indexed toTokenId, uint256 value, bytes data);
+    event ReceivedERC721(address indexed operator, address indexed from, uint256 indexed tokenId, bytes data);
+    event ContractChecked(address indexed contractAddress, bool supportsInterface, bytes4 interfaceId);
+
     struct TokenData {
         uint256 id;
         uint256 slot;
