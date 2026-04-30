@@ -76,7 +76,6 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
     uint256 private s_totalFeesCollected;
 
     bytes32 public constant FEES_MANAGER_ROLE = keccak256("FEES_MANAGER_ROLE");
-    bytes32 public constant OWNER_ROLE = keccak256("OWNER_ROLE");
 
     modifier onlyValidSlot(uint256 slot) {
         _onlyValidSlot(slot);
