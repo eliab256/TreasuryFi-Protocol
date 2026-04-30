@@ -39,9 +39,7 @@ abstract contract ERC3643 is AccessControl {
 
 
     /// @dev Token information
-    string internal   s_tokenName;
-    string internal  s_tokenSymbol;
-    uint8 internal immutable i_tokenDecimals;
+    /// @dev name, symbol and decimals inherit from erc3525
     address internal s_tokenOnchainID;
     string internal constant TOKEN_VERSION = "4.1.3";
 
@@ -73,9 +71,6 @@ abstract contract ERC3643 is AccessControl {
             revert ERC3643__InvalidSymbol();
         if (_decimals == 0 || _decimals > 18)
             revert ERC3643__InvalidDecimals();
-        s_tokenName = _name;
-        s_tokenSymbol = _symbol;
-        i_tokenDecimals = _decimals;
         s_tokenOnchainID = _onchainID;
 
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
@@ -98,61 +93,61 @@ abstract contract ERC3643 is AccessControl {
 
     function setName(string calldata _name) external onlyRole(OWNER_ROLE) {
           if (bytes(_name).length == 0) revert ERC3643__InvalidName();
-        s_tokenName = _name;
-        emit UpdatedTokenInformation(s_tokenName, s_tokenSymbol, i_tokenDecimals, TOKEN_VERSION, s_tokenOnchainID);
+        _setName(_name);
+        emit UpdatedTokenInformation(name(), symbol(), valueDecimals(), TOKEN_VERSION, s_tokenOnchainID);
     }
 
     function setSymbol(string calldata _symbol) external onlyRole(OWNER_ROLE) {
         if (bytes(_symbol).length == 0) revert ERC3643__InvalidSymbol();
-        s_tokenSymbol = _symbol;
-        emit UpdatedTokenInformation(s_tokenName, s_tokenSymbol, i_tokenDecimals, TOKEN_VERSION, s_tokenOnchainID);
+        _setSymbol(_symbol);
+        emit UpdatedTokenInformation(name(), symbol(), valueDecimals(), TOKEN_VERSION, s_tokenOnchainID);
     }
 
     function setOnchainID(address _onchainID) external onlyRole(OWNER_ROLE) {
         s_tokenOnchainID = _onchainID;
-        emit UpdatedTokenInformation(s_tokenName, s_tokenSymbol, i_tokenDecimals, TOKEN_VERSION, s_tokenOnchainID);
+        emit UpdatedTokenInformation(name(), symbol(), valueDecimals(), TOKEN_VERSION, s_tokenOnchainID);
     }
 
     // @audit-issue aggiustare la funzione per erc3525
     function recoveryAddress(
-    address lostWallet,
-    address newWallet,
-    address investorOnchainID
+    address _lostWallet,
+    address _newWallet,
+    address _investorOnchainID
     ) external onlyRole(OWNER_ROLE) returns (bool) {
         // balanceOf(address) → number of ERC721 tokens owned, correct for "has token?" check
-        if (balanceOf(lostWallet) == 0) revert ERC3643__NoTokensToRecover();
+        if (balanceOf(_lostWallet) == 0) revert ERC3643__NoTokensToRecover();
 
-        IIdentity onchainID = IIdentity(investorOnchainID);
-        bytes32 key = keccak256(abi.encode(newWallet));
+        IIdentity onchainID = IIdentity(_investorOnchainID);
+        bytes32 key = keccak256(abi.encode(_newWallet));
 
         if (!onchainID.keyHasPurpose(key, 1)) revert ERC3643__RecoveryNotPossible();
 
         // 1. Register the new wallet BEFORE the transfer
         //    so _beforeValueTransfer finds newWallet as verified
         s_tokenIdentityRegistry.registerIdentity(
-            newWallet,
+            _newWallet,
             onchainID,
-            s_tokenIdentityRegistry.investorCountry(lostWallet)
+            s_tokenIdentityRegistry.investorCountry(_lostWallet)
         );
 
         // 2. Recovery flag: bypasses the SenderFrozen check in _beforeValueTransfer
         s_recovering = true;
 
         // 3. Delegate the transfer of tokens (ERC3525 logic) to the child contract
-        _executeRecoveryTransfer(lostWallet, newWallet);
+        _executeRecoveryTransfer(_lostWallet, _newWallet);
 
         s_recovering = false;
 
         // 4. Propagate the freeze at wallet level if present
-        if (s_frozenWallets[lostWallet]) {
-            _setAddressFrozen(newWallet, true);
-            _setAddressFrozen(lostWallet, false); // unfreeze the old wallet
+        if (s_frozenWallets[_lostWallet]) {
+            _setAddressFrozen(_newWallet, true);
+            _setAddressFrozen(_lostWallet, false); // unfreeze the old wallet
         }
 
         // 5. Remove the identity of the lost wallet
-        s_tokenIdentityRegistry.deleteIdentity(lostWallet);
+        s_tokenIdentityRegistry.deleteIdentity(_lostWallet);
 
-        emit RecoverySuccess(lostWallet, newWallet, investorOnchainID);
+        emit RecoverySuccess(_lostWallet, _newWallet, _investorOnchainID);
         return true;
     }
 
@@ -275,35 +270,23 @@ abstract contract ERC3643 is AccessControl {
         return s_tokenPaused;
     }
 
-    function decimals() external view returns (uint8) {
-        return i_tokenDecimals;
-    }
-
-    function name() external view returns (string memory) {
-        return s_tokenName;
-    }
-
-    function onchainID() external view returns (address) {
+    function onchainID() public view returns (address) {
         return s_tokenOnchainID;
     }
 
-    function symbol() external view returns (string memory) {
-        return s_tokenSymbol;
-    }
-
-    function version() external pure returns (string memory) {
+    function version() public pure returns (string memory) {
         return TOKEN_VERSION;
     }
 
-    function getWalletFrozenStatus(address _wallet) external view returns (bool) {
+    function getWalletFrozenStatus(address _wallet) public view returns (bool) {
         return s_frozenWallets[_wallet];
     }
 
-    function getFrozenValue(uint256 _tokenId) external view returns (uint256) {
+    function getFrozenValue(uint256 _tokenId) public view returns (uint256) {
     return s_frozenValues[_tokenId];
     }
 
-    function getAvailableValue(uint256 _tokenId) external view returns (uint256) {
+    function getAvailableValue(uint256 _tokenId) public view returns (uint256) {
         return balanceOf(_tokenId) - s_frozenValues[_tokenId];
     }
 
@@ -313,7 +296,7 @@ abstract contract ERC3643 is AccessControl {
         uint256 _fromTokenId,
         uint256 _toTokenId,
         uint256 _slot,
-        uint256 _value) internal override{
+        uint256 _value) internal virtual override {
             _whenNotPaused();
             if(_from != address(0)){
                 if(! s_tokenIdentityRegistry.isVerified(_from)){
@@ -336,15 +319,33 @@ abstract contract ERC3643 is AccessControl {
             }
     }
 
-    function _afterValueTransfer(
-        address _from,
-        address _to,
-        uint256 _fromTokenId,
-        uint256 _toTokenId,
-        uint256 _slot,
-        uint256 _value) internal override {
-            
-    }
+    /**
+     * @dev balanceOf function overloaded to support both address and tokenId queries for ERC3643 and ERC3525 compatibility
+     * @dev set to virtual to be overridden in the main token contract with the actual logic to return balances based on address or tokenId
+     * @param _owner The address to query the balance of (for ERC3643) or the tokenId to query the balance of (for ERC3525)
+     * @return The balance of the address or tokenId depending on the input type
+     */
+    function balanceOf(address _owner) public view virtual returns (uint256);
 
+    /**
+     * @dev balanceOf function overloaded to support both address and tokenId queries for ERC3643 and ERC3525 compatibility
+     * @dev set to virtual to be overridden in the main token contract with the actual logic to return balances based on address or tokenId
+     */
+    function balanceOf(uint256 _tokenId) public view virtual returns (uint256);
+
+    // ERC3525 dipendencies, no storage and no implementation here
+    function name() public view virtual returns (string memory);
+    function symbol() public view virtual returns (string memory);
+    function valueDecimals() public view virtual returns (uint8);
+    function _setName(string memory _name) internal virtual;
+    function _setSymbol(string memory _symbol) internal virtual;
+
+    /**
+     * @dev decimals function overloaded to support both ERC3643 and ERC3525 compatibility
+     * @dev set to virtual to be overridden in the main token contract with the actual logic to return decimals based on valueDecimals
+     */
+    function decimals() public view returns (uint8) {
+        return valueDecimals();
+    }
 
 }

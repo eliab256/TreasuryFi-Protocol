@@ -53,16 +53,16 @@ contract ERC3525 is Context, IERC3525, IERC721Enumerable {
         mapping(address => bool) approvals;
     }
 
-    string private s_name;
-    string private s_symbol;
-    uint8 private immutable i_decimals;
-    uint256 private _tokenIdGenerator;
+    string internal s_name;
+    string internal s_symbol;
+    uint8 internal immutable i_decimals;
+    uint256 internal _tokenIdGenerator;
 
     // id => (approval => allowance)
     // @dev _approvedValues cannot be defined within TokenData, cause struct containing mappings cannot be constructed.
-    mapping(uint256 => mapping(address => uint256)) private _approvedValues;
+    mapping(uint256 => mapping(address => uint256)) internal _approvedValues;
 
-    TokenData[] private _allTokens;
+    TokenData[] internal _allTokens;
 
     // key: id
     mapping(uint256 => uint256) private _allTokensIndex;

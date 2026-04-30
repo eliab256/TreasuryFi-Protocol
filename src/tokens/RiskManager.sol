@@ -12,7 +12,7 @@ abstract contract RiskManager {
     mapping(uint256 => uint256) internal s_lastValidYield;
 
     function _updateLastValidYield(uint256 _slot, uint256 _yield) internal {
-        if (!_isValidYield(_slot, _newYield)) {
+        if (!_isValidYield(_slot, _yield)) {
             Revert RiskManager__InvalidYield(_slot, _yield);
         }
         if(s_lastValidYield[_slot] != 0) {

@@ -88,16 +88,7 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
         _;
     }
 
-    modifier whenNotPaused() {
-        super._whenNotPaused();
-        _;
-    }
-
-    modifier whenPaused(){
-        super._whenPaused();
-        _;
-    }
-
+    // @audit-issue sistemare address(0) per compliance in erc3643
     constructor(
         string memory _name,
         string memory _symbol,
@@ -156,7 +147,7 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
         address _mintTo,
         uint256 _slot,
         uint256 _value
-    ) public onlyValidSlot(_slot) whenNotpaused{
+    ) public onlyValidSlot(_slot) {
         // @audit-issue implement openNewPosition function
         if (_value < i_minimumDepositAmount) {
             revert TreasuryBondToken__InvalidValue();
@@ -172,7 +163,7 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
         // 6. _afterValueTransfer hook to update internal accounting
     }
 
-    function closePosition(uint256 _tokenId) public whenNotpaused{
+    function closePosition(uint256 _tokenId) public {
         if (!_isApprovedOrOwner(_msgSender(), _tokenId)) {
             revert TreasuryBondToken__NotApprovedOrOwner();
         }
@@ -191,7 +182,7 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
     function closePartialPosition(
         uint256 _tokenId,
         uint256 _valueToBurn
-    ) public whenNotpaused{
+    ) public {
         if (!_isApprovedOrOwner(_msgSender(), _tokenId)) {
             revert TreasuryBondToken__NotApprovedOrOwner();
         }
@@ -225,7 +216,7 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
         uint256 _fromTokenId,
         address _to,
         uint256 _value
-    ) public payable override etherNotAccepted whenNotPaused returns (uint256 newTokenId) {
+    ) public payable override etherNotAccepted  returns (uint256 newTokenId) {
         // @audit-issue implement T-REX checks
        // newTokenId = super.transferFrom(_fromTokenId, _to, _value);
     }
@@ -234,7 +225,7 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
         address _from,
         address _to,
         uint256 _tokenId
-    ) public payable override etherNotAccepted whenNotPaused{
+    ) public payable override etherNotAccepted {
         // @audit-issue implement checks
         // T-rex checks
         //super.transferFrom(_from, _to, _tokenId);
@@ -245,7 +236,7 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
         address _to,
         uint256 _tokenId,
         bytes memory _data
-    ) public payable override etherNotAccepted whenNotPaused {
+    ) public payable override etherNotAccepted  {
         // @audit-issue implement checks
         // T-rex checks
         //super.safeTransferFrom(_from, _to, _tokenId, _data);
@@ -255,13 +246,13 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
         address _from,
         address _to,
         uint256 _tokenId
-    ) public payable override etherNotAccepted whenNotPaused {
+    ) public payable override etherNotAccepted  {
         // @audit-issue implement checks
         // T-rex checks
         //super.safeTransferFrom(_from, _to, _tokenId, "");
     }
 
-    function claimYield(uint256 _tokenId) public whenNotPaused {
+    function claimYield(uint256 _tokenId) public {
         // @audit-issue implement claimYield function
         // verifica che msg.sender sia owner o approved del token
         // verifica che sia passato abbastanza tempo dall'ultimo claim (es. 30 gg)
@@ -393,18 +384,6 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
         uint256 _value
     ) internal override {}
 
-    /**
-        * @notice Internal function to retrieve the NAV for a given slot from the Reserves Oracle.
-        * @notice getNav reverts on reservesOracle contract if the data is stale, so no need to check staleness here
-        * @param _slot The slot ID for which to retrieve the NAV (1 for 2Y, 2 for 5Y, 3 for 10Y, 4 for 30Y).
-        * @return slotNav The NAV value for the specified slot.
-        * @return navDecimals The number of decimals of the NAV value returned by the oracle.
-     */
-    function _getNav(uint256 _slot) internal view returns (uint256 slotNav, uint8 navDecimals) {
-        slotNav = i_reservesOracle.getNav(_slot);
-        navDecimals = i_reservesOracle.getDecimals(); 
-    }
-
 
     function _calculateEntryFees(
         uint256 _amount
@@ -434,6 +413,34 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
         // @audit-issue implement convertUsdcUsd function
         // se _usdcToUsd è true, converti l'amount da USDC a USD usando il price feed di Chainlink
         // altrimenti converti da USD a USDC
+    }
+
+    /**
+    * @notice Sets the token name by writing directly to ERC3525 storage.
+    * @dev Bridge function between ERC3643 and ERC3525.
+    *      ERC3643 cannot access ERC3525 storage directly because the two contracts
+    *      are not in the same inheritance chain — they are both base contracts of
+    *      TreasuryBondToken. This function acts as the concrete implementation of
+    *      the virtual hook declared in ERC3643, allowing setName() in ERC3643 to
+    *      write to s_name which lives in ERC3525.
+    * @param _name The new token name to set.
+    */
+    function _setName(string memory _name) internal override {
+        s_name = _name;
+    }
+
+    /**
+    * @notice Sets the token symbol by writing directly to ERC3525 storage.
+    * @dev Bridge function between ERC3643 and ERC3525.
+    *      ERC3643 cannot access ERC3525 storage directly because the two contracts
+    *      are not in the same inheritance chain — they are both base contracts of
+    *      TreasuryBondToken. This function acts as the concrete implementation of
+    *      the virtual hook declared in ERC3643, allowing setSymbol() in ERC3643 to
+    *      write to s_symbol which lives in ERC3525.
+    * @param _symbol The new token symbol to set.
+    */
+    function _setSymbol(string memory _symbol) internal override {
+        s_symbol = _symbol;
     }
 
     /**
