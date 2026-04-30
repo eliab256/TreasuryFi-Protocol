@@ -58,6 +58,9 @@ abstract contract ERC3643 is AccessControl {
     /// @dev Compliance contract linked to the onchain validator system
     IModularCompliance internal s_tokenCompliance;
 
+    string internal s_name;
+    string internal s_symbol;
+
     constructor(
         string memory _name,
         string memory _symbol,
@@ -71,6 +74,11 @@ abstract contract ERC3643 is AccessControl {
             revert ERC3643__InvalidSymbol();
         if (_decimals == 0 || _decimals > 18)
             revert ERC3643__InvalidDecimals();
+        if( _identityRegistry == address(0)){
+            revert ERC3643__ZeroAddress();
+        }
+        s_name = _name;
+        s_symbol = _symbol;
         s_tokenOnchainID = _onchainID;
 
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
@@ -93,19 +101,19 @@ abstract contract ERC3643 is AccessControl {
 
     function setName(string calldata _name) external onlyRole(OWNER_ROLE) {
           if (bytes(_name).length == 0) revert ERC3643__InvalidName();
-        _setName(_name);
-        emit UpdatedTokenInformation(name(), symbol(), valueDecimals(), TOKEN_VERSION, s_tokenOnchainID);
+        s_name = _name;
+        emit UpdatedTokenInformation(_name, s_symbol, valueDecimals(), TOKEN_VERSION, s_tokenOnchainID);
     }
 
     function setSymbol(string calldata _symbol) external onlyRole(OWNER_ROLE) {
         if (bytes(_symbol).length == 0) revert ERC3643__InvalidSymbol();
-        _setSymbol(_symbol);
-        emit UpdatedTokenInformation(name(), symbol(), valueDecimals(), TOKEN_VERSION, s_tokenOnchainID);
+        s_symbol = _symbol;
+        emit UpdatedTokenInformation(s_name, _symbol, valueDecimals(), TOKEN_VERSION, s_tokenOnchainID);
     }
 
     function setOnchainID(address _onchainID) external onlyRole(OWNER_ROLE) {
         s_tokenOnchainID = _onchainID;
-        emit UpdatedTokenInformation(name(), symbol(), valueDecimals(), TOKEN_VERSION, s_tokenOnchainID);
+        emit UpdatedTokenInformation(s_name, s_symbol, valueDecimals(), TOKEN_VERSION, _onchainID);
     }
 
     // @audit-issue aggiustare la funzione per erc3525
@@ -296,7 +304,7 @@ abstract contract ERC3643 is AccessControl {
         uint256 _fromTokenId,
         uint256 _toTokenId,
         uint256 _slot,
-        uint256 _value) internal virtual override {
+        uint256 _value) internal virtual {
             _whenNotPaused();
             if(_from != address(0)){
                 if(! s_tokenIdentityRegistry.isVerified(_from)){
@@ -333,19 +341,7 @@ abstract contract ERC3643 is AccessControl {
      */
     function balanceOf(uint256 _tokenId) public view virtual returns (uint256);
 
-    // ERC3525 dipendencies, no storage and no implementation here
-    function name() public view virtual returns (string memory);
-    function symbol() public view virtual returns (string memory);
     function valueDecimals() public view virtual returns (uint8);
-    function _setName(string memory _name) internal virtual;
-    function _setSymbol(string memory _symbol) internal virtual;
 
-    /**
-     * @dev decimals function overloaded to support both ERC3643 and ERC3525 compatibility
-     * @dev set to virtual to be overridden in the main token contract with the actual logic to return decimals based on valueDecimals
-     */
-    function decimals() public view returns (uint8) {
-        return valueDecimals();
-    }
 
 }

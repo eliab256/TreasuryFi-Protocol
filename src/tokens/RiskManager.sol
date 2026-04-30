@@ -13,12 +13,13 @@ abstract contract RiskManager {
 
     function _updateLastValidYield(uint256 _slot, uint256 _yield) internal {
         if (!_isValidYield(_slot, _yield)) {
-            Revert RiskManager__InvalidYield(_slot, _yield);
+            revert RiskManager__InvalidYield(_slot, _yield);
         }
         if(s_lastValidYield[_slot] != 0) {
-            uint256 shock = _yield > s_lastValidYield[_slot] ? _yield - s_lastValidYield[_slot] : s_lastValidYield[_slot] - _yield;
+            uint256 shock = _yield > s_lastValidYield[_slot] ? _yield - s_lastValidYield[_slot] : 
+            s_lastValidYield[_slot] - _yield;
             if (shock > MAX_YIELD_SHOCK_BPS) {
-                Revert RiskManager__ExcessiveYieldShock(_slot, shock);
+                revert RiskManager__ExcessiveYieldShock(_slot, shock);
             }
         }
         s_lastValidYield[_slot] = _yield;
@@ -27,7 +28,9 @@ abstract contract RiskManager {
     function _isValidYield(uint256 _slot, uint256 _newYield) internal view returns (bool) {
         if (_newYield != 0 && _newYield < MAX_YIELD) {
             return true;
-        } 
+        } else {
+            return false;
+        }
     }
 
 }

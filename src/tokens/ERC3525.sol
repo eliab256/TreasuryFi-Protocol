@@ -53,8 +53,7 @@ contract ERC3525 is Context, IERC3525, IERC721Enumerable {
         mapping(address => bool) approvals;
     }
 
-    string internal s_name;
-    string internal s_symbol;
+
     uint8 internal immutable i_decimals;
     uint256 internal _tokenIdGenerator;
 
@@ -81,10 +80,8 @@ contract ERC3525 is Context, IERC3525, IERC721Enumerable {
         _;
     }
 
-    constructor(string memory _name, string memory _symbol, uint8 _decimals) {
+    constructor( uint8 _decimals) {
         _tokenIdGenerator = 1;
-        s_name = _name;
-        s_symbol = _symbol;
         i_decimals = _decimals;
     }
 
@@ -102,14 +99,10 @@ contract ERC3525 is Context, IERC3525, IERC721Enumerable {
      * @dev Returns the token collection name.
      */
     function name() public view virtual returns (string memory) {
-        return s_name;
     }
 
-    /**
-     * @dev Returns the token collection symbol.
-     */
+
     function symbol() public view virtual returns (string memory) {
-        return s_symbol;
     }
 
     /**

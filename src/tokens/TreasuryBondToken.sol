@@ -87,7 +87,6 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
         _;
     }
 
-    // @audit-issue sistemare address(0) per compliance in erc3643
     constructor(
         string memory _name,
         string memory _symbol,
@@ -98,7 +97,7 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
         address _reservesOracle,
         address _bondOracle,
         address _feesCollector
-    ) ERC3643(_name, _symbol, _decimals, address(this), _identityRegistry, address(0)) ERC3525(_name, _symbol, _decimals)  {
+    ) ERC3643(_name, _symbol, _decimals, address(this), _identityRegistry, address(0)) ERC3525(_decimals)  {
         // Checks
         if (
             _usdcAddress == address(0) ||
@@ -415,34 +414,6 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
     }
 
     /**
-    * @notice Sets the token name by writing directly to ERC3525 storage.
-    * @dev Bridge function between ERC3643 and ERC3525.
-    *      ERC3643 cannot access ERC3525 storage directly because the two contracts
-    *      are not in the same inheritance chain — they are both base contracts of
-    *      TreasuryBondToken. This function acts as the concrete implementation of
-    *      the virtual hook declared in ERC3643, allowing setName() in ERC3643 to
-    *      write to s_name which lives in ERC3525.
-    * @param _name The new token name to set.
-    */
-    function _setName(string memory _name) internal override {
-        s_name = _name;
-    }
-
-    /**
-    * @notice Sets the token symbol by writing directly to ERC3525 storage.
-    * @dev Bridge function between ERC3643 and ERC3525.
-    *      ERC3643 cannot access ERC3525 storage directly because the two contracts
-    *      are not in the same inheritance chain — they are both base contracts of
-    *      TreasuryBondToken. This function acts as the concrete implementation of
-    *      the virtual hook declared in ERC3643, allowing setSymbol() in ERC3643 to
-    *      write to s_symbol which lives in ERC3525.
-    * @param _symbol The new token symbol to set.
-    */
-    function _setSymbol(string memory _symbol) internal override {
-        s_symbol = _symbol;
-    }
-
-    /**
      * @notice Internal function to validate that a slot is one of the predefined constants.
      * @dev Ensures that the provided slot is valid.
      * @param _slot The slot to validate.
@@ -505,6 +476,20 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
     function getLiabilitiesForSlot(uint256 _slot) external view onlyValidSlot(_slot) returns (uint256) {
          return s_totalValuePerSlot[_slot];
     }
+
+    function name() public view override returns (string memory) {
+        return super.name();
+    }
+
+    function symbol() public view override returns (string memory) {
+        return super.symbol();
+    }
+
+    function valueDecimals() public view override returns (uint8) {
+        return super.valueDecimals();
+    }
+
+
 
 
     // @audit-issue move to a separated risk managment contract
