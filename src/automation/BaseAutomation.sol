@@ -17,11 +17,11 @@ abstract contract BaseAutomation is IBaseAutomation, AccessControl {
 
     address private s_chainlinkForwarder;
     uint256 private s_upkeepId;
-    uint256 internal s_interval;
+    uint256 internal immutable i_interval;
     uint256 internal s_lastUpkeep;
 
     constructor(address initialAdmin, uint256 _interval) {
-        s_interval = _interval;
+        i_interval = _interval;
         _grantRole(DEFAULT_ADMIN_ROLE, initialAdmin);
         _grantRole(AUTOMATION_ADMIN_ROLE, initialAdmin);
     }
@@ -58,7 +58,7 @@ abstract contract BaseAutomation is IBaseAutomation, AccessControl {
     function checkUpkeep(
         bytes calldata
     ) public view override returns (bool upkeepNeeded, bytes memory) {
-        upkeepNeeded = block.timestamp >= (s_lastUpkeep + s_interval);
+        upkeepNeeded = block.timestamp >= (s_lastUpkeep + i_interval);
         return (upkeepNeeded, "");
     }
 
@@ -74,7 +74,7 @@ abstract contract BaseAutomation is IBaseAutomation, AccessControl {
         }
 
         bool withinGracePeriod = block.timestamp <
-            (s_lastUpkeep + GRACE_PERIOD + s_interval);
+            (s_lastUpkeep + GRACE_PERIOD + i_interval);
 
         if (withinGracePeriod) {
             // During grace period: only Chainlink Automation can call
@@ -107,15 +107,23 @@ abstract contract BaseAutomation is IBaseAutomation, AccessControl {
         return s_chainlinkForwarder;
     }
 
+    function getGracePeriod() external pure returns (uint256) {
+        return GRACE_PERIOD;
+    } 
+
     function getUpkeepId() external view returns (uint256) {
         return s_upkeepId;
     }
 
     function getInterval() external view returns (uint256) {
-        return s_interval;
+        return i_interval;
     }
 
     function getLastUpkeep() external view returns (uint256) {
         return s_lastUpkeep;
+    }
+
+    function getAllUpkeepInfo() external view returns (uint256 interval, uint256 gracePeriod, uint256 lastUpkeep) {
+        return (i_interval, GRACE_PERIOD, s_lastUpkeep);
     }
 }

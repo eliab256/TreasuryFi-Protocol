@@ -3,7 +3,7 @@ pragma solidity ^0.8.0;
 
 import {IBaseAutomation} from "./IBaseAutomation.sol";
 
-interface IReservesAutomation {
+interface IReservesAutomation is IBaseAutomation {
     // --- Errors ---
     error ReservesAutomation__ZeroAddress();
 

@@ -48,6 +48,7 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
     error TreasuryBondToken__InvalidValue();
     error TreasuryBondToken__ZeroAddress();
     error TreasuryBondToken__InvalidOracle(address oracle, bytes4 interfaceId);
+    error TreasuryBondToken__InvalidAutomation(address automation, bytes4 interfaceId);
     error TreasuryBondToken__SenderNotVerified();
     error TreasuryBondToken__ReceiverNotVerified();
     error TreasuryBondToken__WalletAlreadyFrozen();
@@ -65,9 +66,6 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
     uint8 private immutable i_usdcDecimals; // 6 for usdc
     uint8 private immutable i_usdcPriceFeedDecimals; // 8 for chainlink price feed
     uint256 private immutable i_minimumDepositAmount; // 10 USDC
-
-    IReservesOracle private immutable i_reservesOracle;
-    IBondOracle private immutable i_bondOracle;
 
     /// @dev liabilities for each slot, updated on mint, burn and yield claim
     mapping(uint256 => uint256) private s_totalValuePerSlot;
@@ -94,18 +92,24 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
         address _usdcAddress,
         address _usdcPriceFeedAddress,
         address _identityRegistry,
+        address _bondAutomation,
+        address _reservesAutomation,
         address _reservesOracle,
         address _bondOracle,
         address _feesCollector
     ) ERC3643(_name, _symbol, _decimals, address(this), _identityRegistry, address(0)) ERC3525(_decimals)  {
-        // Checks
+        // Checks for zero addresses
         if (
             _usdcAddress == address(0) ||
             _usdcPriceFeedAddress == address(0) ||
-            _feesCollector == address(0)
+            _feesCollector == address(0) ||
+            _bondAutomation == address(0) ||
+            _reservesAutomation == address(0) ||
+            _reservesOracle == address(0) ||
+            _bondOracle == address(0)
         ) revert TreasuryBondToken__ZeroAddress();
 
-        // ERC165 interface checks
+        // ERC165 interface checks for oracles
         bytes4 bondOracleInterfaceId = type(IBondOracle).interfaceId;
         if (!IERC165(_bondOracle).supportsInterface(bondOracleInterfaceId)) {
             revert TreasuryBondToken__InvalidOracle(
@@ -125,14 +129,30 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
             );
         }
 
+        // ERC165 interface checks for automations
+        bytes4 bondAutomationInterfaceId = type(IBondAutomation).interfaceId;
+        if (!IERC165(_bondAutomation).supportsInterface(bondAutomationInterfaceId)) {
+            revert TreasuryBondToken__InvalidAutomation(
+                _bondAutomation,
+                bondAutomationInterfaceId
+            );
+        }
+
+        bytes4 reservesAutomationInterfaceId = type(IReservesAutomation).interfaceId;
+        if (!IERC165(_reservesAutomation).supportsInterface(reservesAutomationInterfaceId)) {
+            revert TreasuryBondToken__InvalidAutomation(
+                _reservesAutomation,
+                reservesAutomationInterfaceId
+            );
+        }
+
         _grantRole(FEES_MANAGER_ROLE, _feesCollector);
         i_usdc = IERC20(_usdcAddress);
         i_usdcPriceFeed = AggregatorV3Interface(_usdcPriceFeedAddress);
         i_usdcDecimals = IERC20Metadata(_usdcAddress).decimals();
         i_usdcPriceFeedDecimals = i_usdcPriceFeed.decimals();
         i_minimumDepositAmount = 10 * (10 ** i_usdcDecimals); // 10 USDC with decimals
-        i_reservesOracle = IReservesOracle(_reservesOracle);
-        i_bondOracle = IBondOracle(_bondOracle);
+
     }
 
     function supportsInterface(
@@ -288,7 +308,7 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
         uint256 _toTokenId,
         uint256 _slot,
         uint256 _value
-    ) internal override {
+    ) internal override(ERC3643, ERC3525) {
         // 1. ERC3643 checks
         super._beforeValueTransfer(_from, _to, _fromTokenId, _toTokenId, _slot, _value);
 
@@ -343,10 +363,10 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
         address lostWallet,
         address newWallet
     ) internal override {
-        // balanceOf(address) restituisce il numero di token ERC721 posseduti
+        // balanceOf(address) returns the number of ERC721 tokens owned by the address, so if it's 0 it means there are no tokens to recover
         uint256 tokenCount = balanceOf(lostWallet);
 
-        // Snapshot degli id PRIMA di trasferire (l'array cambia ad ogni trasferimento)
+        // id snaphot BEFORE transfer to avoid issues with token enumeration after transfer
         uint256[] memory tokenIds = new uint256[](tokenCount);
         for (uint256 i = 0; i < tokenCount; i++) {
             tokenIds[i] = tokenOfOwnerByIndex(lostWallet, i);
@@ -355,10 +375,10 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
         for (uint256 i = 0; i < tokenIds.length; i++) {
             uint256 tokenId = tokenIds[i];
 
-            // I frozen values sono mappati per tokenId → seguono il token automaticamente,
-            // non serve migrarli (il mapping s_frozenValues[tokenId] rimane invariato).
+            // Frozen values are mapped by tokenId, they follow the token automatically,
+            // no need to migrate them (the mapping s_frozenValues[tokenId] remains unchanged).
 
-            // _transferTokenId è internal in ERC3525 e bypassa il check onlyApprovedOrOwner
+            // _transferTokenId is internal in ERC3525 and bypasses the onlyApprovedOrOwner check
             _transferTokenId(lostWallet, newWallet, tokenId);
         }
     }
@@ -436,6 +456,16 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
         }
     }
 
+    function ownerOf(uint256 tokenId) public view override returns (address) {
+        return super.ownerOf(tokenId);
+    }
+
+    function balanceOf(uint256 tokenId) public view override(ERC3643, ERC3525) returns (uint256) {
+        return super.balanceOf(tokenId);
+    }
+    function balanceOf(address owner) public view override(ERC3643, ERC3525) returns (uint256) {
+        return super.balanceOf(owner);
+    }
 
     /**
      * @notice Returns the total value deposited for a specific bond slot (maturity).
@@ -485,7 +515,7 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
         return super.symbol();
     }
 
-    function valueDecimals() public view override returns (uint8) {
+    function valueDecimals() public view override(ERC3643, ERC3525) returns (uint8) {
         return super.valueDecimals();
     }
 

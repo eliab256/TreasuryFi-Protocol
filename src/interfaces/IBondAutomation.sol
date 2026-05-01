@@ -3,7 +3,7 @@ pragma solidity ^0.8.0;
 
 import {IBaseAutomation} from "./IBaseAutomation.sol";
 
-interface IBondAutomation  {
+interface IBondAutomation is IBaseAutomation {
     // --- Errors ---
     error BondAutomation__ZeroAddress();
 

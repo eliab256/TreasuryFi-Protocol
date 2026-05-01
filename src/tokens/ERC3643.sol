@@ -39,8 +39,11 @@ abstract contract ERC3643 is AccessControl {
 
 
     /// @dev Token information
-    /// @dev name, symbol and decimals inherit from erc3525
+    /// @dev  decimals inherit from erc3525
+    string internal s_name;
+    string internal s_symbol;
     address internal s_tokenOnchainID;
+    bool internal s_tokenPaused = false;
     string internal constant TOKEN_VERSION = "4.1.3";
 
     /// @dev Variables of freeze and pause functions
@@ -49,17 +52,13 @@ abstract contract ERC3643 is AccessControl {
     mapping(uint256 => uint256) private s_frozenValues;
     bool internal s_recovering;
 
-    bytes32 public constant OWNER_ROLE = keccak256("OWNER_ROLE");
-    bool internal s_tokenPaused = false;
+    bytes32 public constant OWNER_ROLE = keccak256("OWNER_ROLE"); 
 
     /// @dev Identity Registry contract used by the onchain validator system
     IIdentityRegistry internal s_tokenIdentityRegistry;
 
     /// @dev Compliance contract linked to the onchain validator system
     IModularCompliance internal s_tokenCompliance;
-
-    string internal s_name;
-    string internal s_symbol;
 
     constructor(
         string memory _name,
@@ -122,19 +121,23 @@ abstract contract ERC3643 is AccessControl {
     address _newWallet,
     address _investorOnchainID
     ) external onlyRole(OWNER_ROLE) returns (bool) {
-        // balanceOf(address) → number of ERC721 tokens owned, correct for "has token?" check
+        // Checks if the new wallet is different from the lost one and not already verified in the identity registry
+        if (_newWallet == _lostWallet) revert ERC3643__RecoveryNotPossible();
+        if (s_tokenIdentityRegistry.isVerified(_newWallet)) revert ERC3643__RecoveryNotPossible();
+
+        // checks if has tokens to recover
         if (balanceOf(_lostWallet) == 0) revert ERC3643__NoTokensToRecover();
 
-        IIdentity onchainID = IIdentity(_investorOnchainID);
+        IIdentity investorOnchainID = IIdentity(_investorOnchainID);
         bytes32 key = keccak256(abi.encode(_newWallet));
 
-        if (!onchainID.keyHasPurpose(key, 1)) revert ERC3643__RecoveryNotPossible();
+        if (!investorOnchainID.keyHasPurpose(key, 1)) revert ERC3643__RecoveryNotPossible();
 
         // 1. Register the new wallet BEFORE the transfer
         //    so _beforeValueTransfer finds newWallet as verified
         s_tokenIdentityRegistry.registerIdentity(
             _newWallet,
-            onchainID,
+            investorOnchainID,
             s_tokenIdentityRegistry.investorCountry(_lostWallet)
         );
 
@@ -142,10 +145,17 @@ abstract contract ERC3643 is AccessControl {
         s_recovering = true;
 
         // 3. Delegate the transfer of tokens (ERC3525 logic) to the child contract
-        _executeRecoveryTransfer(_lostWallet, _newWallet);
+        try this._executeRecoveryTransferExternal(_lostWallet, _newWallet) {
+        // recovery succeeded
+        } catch {
+            s_recovering = false;
+            //Cleanup of the registration done above if the transfer fails, to avoid leaving an orphan identity in the registry
+            s_tokenIdentityRegistry.deleteIdentity(_newWallet);
+            revert ERC3643__RecoveryNotPossible();
+        }
 
         s_recovering = false;
-
+        
         // 4. Propagate the freeze at wallet level if present
         if (s_frozenWallets[_lostWallet]) {
             _setAddressFrozen(_newWallet, true);
@@ -209,6 +219,18 @@ abstract contract ERC3643 is AccessControl {
         for (uint256 i = 0; i < _tokenId.length; i++) {
             _unfreezePartialToken(_tokenId[i], _amounts[i]);
         }
+    }
+
+    /**
+     * @notice Public wrapper necessary for try/catch functionality.
+     * @dev Solidity requires that calls in try/catch blocks are external. We use `this.` to make an external call to the contract itself.
+     * The function is marked `onlyRole` to prevent arbitrary calls from outside.
+     */
+    function _executeRecoveryTransferExternal(
+        address lostWallet,
+        address newWallet
+    ) external onlyRole(OWNER_ROLE) {
+        _executeRecoveryTransfer(lostWallet, newWallet);
     }
 
 
@@ -340,6 +362,7 @@ abstract contract ERC3643 is AccessControl {
      * @dev set to virtual to be overridden in the main token contract with the actual logic to return balances based on address or tokenId
      */
     function balanceOf(uint256 _tokenId) public view virtual returns (uint256);
+
 
     function valueDecimals() public view virtual returns (uint8);
 

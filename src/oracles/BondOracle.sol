@@ -65,6 +65,12 @@ contract BondOracle is IBondOracle, ERC165, AccessControl {
         revert BondOracle__InvalidSlot();
     }
 
+    function getAllYields() external view returns (BondYieldsResponse memory) {
+        BondYieldsResponse memory yields = s_bondYieldsResponse;
+        if (_isStale(yields.timestamp)) revert BondOracle__DataIsStale();
+        return yields;
+    }
+
     function isStale() public view returns (bool) {
         return _isStale(s_bondYieldsResponse.timestamp);
     }

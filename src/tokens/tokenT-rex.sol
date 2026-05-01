@@ -1,5 +1,5 @@
-
-pragma solidity 0.8.17;
+//SPDX-License-Identifier: MIT
+pragma solidity ^0.8.17;
 
 // import "./IToken.sol";
 // import "@onchain-id/solidity/contracts/interface/IIdentity.sol";
@@ -75,30 +75,7 @@ pragma solidity 0.8.17;
 //         revert("Transfer not possible");
 //     }
 
-//     /**
-//      *  @dev See {IToken-mint}.
-//      */
-//     function mint(address _to, uint256 _amount) public override onlyAgent {
-//         require(_tokenIdentityRegistry.isVerified(_to), "Identity is not verified.");
-//         require(_tokenCompliance.canTransfer(address(0), _to, _amount), "Compliance not followed");
-//         _mint(_to, _amount);
-//         _tokenCompliance.created(_to, _amount);
-//     }
 
-//     /**
-//      *  @dev See {IToken-burn}.
-//      */
-//     function burn(address _userAddress, uint256 _amount) public override onlyAgent {
-//         require(balanceOf(_userAddress) >= _amount, "cannot burn more than balance");
-//         uint256 freeBalance = balanceOf(_userAddress) - _frozenTokens[_userAddress];
-//         if (_amount > freeBalance) {
-//             uint256 tokensToUnfreeze = _amount - (freeBalance);
-//             _frozenTokens[_userAddress] = _frozenTokens[_userAddress] - (tokensToUnfreeze);
-//             emit TokensUnfrozen(_userAddress, tokensToUnfreeze);
-//         }
-//         _burn(_userAddress, _amount);
-//         _tokenCompliance.destroyed(_userAddress, _amount);
-//     }
 
 
 

@@ -21,6 +21,7 @@ interface IBondOracle {
     /// @notice Returns the yield for a given slot (1=2Y, 2=5Y, 3=10Y, 4=30Y)
     /// @dev Reverts if data is stale or slot is invalid
     function getYield(uint256 slot) external view returns (uint64);
+    function getAllYields() external view returns (BondYieldsResponse memory);
     function updateYields(uint64[] memory values, uint256 timestamp, bytes memory err) external;
 
     /// @notice Returns true if the stored data is stale

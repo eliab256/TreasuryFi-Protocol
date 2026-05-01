@@ -42,4 +42,6 @@ interface IBaseAutomation is AutomationCompatibleInterface, IAccessControl {
     function getUpkeepId() external view returns (uint256);
     function getInterval() external view returns (uint256);
     function getLastUpkeep() external view returns (uint256);
+    function getGracePeriod() external pure returns (uint256);
+    function getAllUpkeepInfo() external view returns (uint256 interval, uint256 gracePeriod, uint256 lastUpkeep);
 }
