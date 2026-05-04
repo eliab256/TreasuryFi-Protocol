@@ -36,9 +36,7 @@ abstract contract UsdcUsdConverter {
         * @param usdcAmount The amount of USDC to convert (6 decimals).
         * @return usdAmount The equivalent USD value (18 decimals).
     */
-    function _convertUsdcToUsd(
-        uint256 usdcAmount
-    ) internal view returns (uint256 usdAmount) {
+    function _convertUsdcToUsd(uint256 usdcAmount) internal view returns (uint256 usdAmount) {
         uint256 usdcPrice = _getLatestUsdcPrice();
 
         uint256 usdcDecimals = i_usdcDecimals; // 6 for USDC
@@ -68,9 +66,7 @@ abstract contract UsdcUsdConverter {
     * @param usdAmount The USD amount to convert (18 decimals).
     * @return usdcAmount The equivalent USDC amount (6 decimals).
     */
-    function _convertUsdToUsdc(
-        uint256 usdAmount
-    ) internal view returns (uint256 usdcAmount) {
+    function _convertUsdToUsdc(uint256 usdAmount) internal view returns (uint256 usdcAmount) {
         uint256 usdcPrice = _getLatestUsdcPrice();
 
         uint256 usdcDecimals = i_usdcDecimals; // 6 for USDC

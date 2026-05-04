@@ -66,11 +66,11 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
     
     uint256 private immutable i_minimumDepositAmount; // 10 USDC
 
-    /// @dev liabilities for each slot, updated on mint, burn and yield claim
-    mapping(uint256 => uint256) private s_totalValuePerSlot;
-
     mapping(uint256 => PositionData) private s_fromIdToPositionData;
-    uint256 private s_totalFeesCollected;
+
+    /// @dev total fees collected by the protocol, updated on entry, exit and yield claim
+    /// @dev is a 6 decimals value, since fees are collected in USDC
+    uint256 private s_totalFeesCollected; 
 
     bytes32 public constant FEES_MANAGER_ROLE = keccak256("FEES_MANAGER_ROLE");
     bytes32 public constant AUTOMATION_TRIGGERER_ROLE = keccak256("AUTOMATION_TRIGGERER_ROLE");
@@ -193,7 +193,6 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
         // 3. TransferFrom this contract to caller the USDC value of the burned token
         // update total value for the slot
         // 4. Burn the specified ERC-3525 token
-        _burn(_tokenId);
         // 5. _afterValueTransfer hook to update internal accounting
     }
 
