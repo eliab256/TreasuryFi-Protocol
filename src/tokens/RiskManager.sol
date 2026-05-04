@@ -32,6 +32,15 @@ abstract contract RiskManager {
     BondYieldsResponse internal s_lastValidYields;
     ReservesResponse internal s_lastValidReserves;
 
+    /**
+         * @notice Constructor to initialize the RiskManager with references to automation and oracle contracts.
+         * @dev All addresses checks are done on the main contract
+         * @param _yieldsAutomation Address of the BondAutomation contract.
+         * @param _reservesAutomation Address of the ReservesAutomation contract.
+         * @param _reservesOracle Address of the ReservesOracle contract.
+         * @param _yieldsOracle Address of the BondOracle contract.
+
+     */
     constructor(address _yieldsAutomation, address _reservesAutomation, address _reservesOracle, address _yieldsOracle) {
         i_yieldsAutomation = IBondAutomation(_yieldsAutomation);
         i_reservesAutomation = IReservesAutomation(_reservesAutomation);
@@ -40,44 +49,46 @@ abstract contract RiskManager {
         (i_interval , i_gracePeriod, ) = i_yieldsAutomation.getAllUpkeepInfo();
     }
 
-    /**
-     * @notice Internal function to trigger yields upkeep automation.
-     * @dev Returns true if upkeep was executed, false if grace period has not elapsed.
-     * @return bool indicating whether upkeep was triggered.
-     */
-    function _triggerYieldsUpkeep() private returns (bool) {
-        if (!_checkManualTriggerNeeded(s_lastUpkeepTriggerYields)) {
-            return false;
-        }
+////////////////////////////////////////////////////////////////////
+////////////////////// Oracle data validation ////////////////////// 
+////////////////////////////////////////////////////////////////////  
 
+    /**
+     * @notice Internal function to manually trigger the bond yields upkeep
+     * @dev Reverts if the grace period since the last trigger has not elapsed or if the upkeep is not needed, to avoid unnecessary calls.
+     * @dev This function should be use on the main contract on his public function dedicated
+     */
+    function _triggerYieldsUpkeep() internal {
+        bool upkeepNeedTrigger = _checkManualTriggerNeeded(s_lastUpkeepTriggerYields);
+        if(!upkeepNeedTrigger) {
+            revert RiskManager__AutomationGracePeriodNotElapsed();
+        }
         // checkUpkeep needed to avoid causing revert on performUpkeep
         (bool upkeepNeeded, ) = i_yieldsAutomation.checkUpkeep("");
         if (upkeepNeeded) {
             i_yieldsAutomation.performUpkeep("");
             s_lastUpkeepTriggerYields = block.timestamp;
         }
-        return true;
     }
     
     /**
-     * @notice Internal function to trigger reserves upkeep automation only if grace period has elapsed since last trigger.
-     * @dev Returns true if upkeep was executed, false if grace period has not elapsed.
-     * @return bool indicating whether upkeep was triggered.
+     * @notice Internal function to manually trigger the reserves upkeep
+     * @dev Reverts if the grace period since the last trigger has not elapsed or if the upkeep is not needed, to avoid unnecessary calls.
+     * @dev This function should be use on the main contract on his public function dedicated
      */
-     // @audit-issue valutare se togliere il bool di return
-    function _triggerReservesUpkeep() private returns (bool) {
-        if (!_checkManualTriggerNeeded(s_lastUpkeepTriggerReserves)) {
-            return false;
+    function _triggerReservesUpkeep() internal  {
+        bool upkeepNeedTrigger = _checkManualTriggerNeeded(s_lastUpkeepTriggerReserves);
+        if(!upkeepNeedTrigger) {
+            revert RiskManager__AutomationGracePeriodNotElapsed();
         }
-
         // checkUpkeep needed to avoid causing revert on performUpkeep
         (bool upkeepNeeded, ) = i_reservesAutomation.checkUpkeep("");
         if (upkeepNeeded) {
             i_reservesAutomation.performUpkeep("");
             s_lastUpkeepTriggerReserves = block.timestamp;
         }
-        return true;
     }
+
 
     function _checkManualTriggerNeeded(uint256 lastTriggerTimestamp) private view returns (bool) {
         if (block.timestamp > lastTriggerTimestamp + i_interval + i_gracePeriod) {
@@ -87,29 +98,16 @@ abstract contract RiskManager {
         }
     }
 
-    //function che verifica l' affidabilità dei dati ricevuti da oracle yelds
-    function _validateYields() internal returns (bool) {
-        // 1. If automation doens't work for some reason and grace period has elapsed, trigger it manually. otherwise do nothing
-        _triggerYieldsUpkeep();
-        // 2. Check if data are not stale, if they are, return false (data not valid)
-        if (i_yieldsOracle.isStale()) {
-            return false;
-        } 
+    function _validSingleYield(uint256 _slot) private view returns (bool) {
+        
     }
 
-    //function che verifica l' affidabilità dei dati ricevuti da oracle reserves
-    function _validateReserves() internal returns (bool) {
-        // 1. If automation doens't work for some reason and grace period has elapsed, trigger it manually. otherwise do nothing
-        _triggerReservesUpkeep();
-        // 2. Check if data are not stale, if they are, return false (data not valid)
-        if (i_reservesOracle.isStale()) {
-            return false;
-            }
+    function _validateSingleReserve(uint256 _slot) private view returns (bool) {
+
     }
 
 
-
-    function _updateLastValidYield(uint256 _slot, uint256 _yield) internal {
+    function _updateLastValidYield(uint256 _slot, uint256 _yield) private {
         if (_yield != 0 && _yield > MAX_YIELD) {
             revert RiskManager__InvalidYield(_slot, _yield);
         }
@@ -123,11 +121,20 @@ abstract contract RiskManager {
         s_lastValidYield[_slot] = _yield;
     }
 
-    function _bondYieldsNeedUpdate() internal view returns (bool) {
-        if(s_lastValidYields.timestamp > block.timestamp ){ 
-            return true;
+
+    function _beforeMinting() internal {
+        BondYieldsResponse memory yieldsResponse;
+        ReservesResponse memory reservesResponse;
+        if(s_lastValidYields.timestamp + i_interval < block.timestamp || 
+           s_lastValidReserves.timestamp + i_interval < block.timestamp) {
+            yieldsResponse = i_yieldsOracle.getAllYields();
+            reservesResponse = i_reservesOracle.getAllReserves();
+        } else {
+            yieldsResponse = s_lastValidYields;
+            reservesResponse = s_lastValidReserves;
         }
-        else return false; 
+
+        
     }
 
 

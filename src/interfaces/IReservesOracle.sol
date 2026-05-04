@@ -1,5 +1,6 @@
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
+import {ReservesResponse} from "../types.sol";
 
 interface IReservesOracle {
     // Errors
@@ -36,6 +37,7 @@ interface IReservesOracle {
 
     // Getters
     function getReserveUsdValue(uint256 slot) external view returns (uint256);
+    function getAllReserves() external view returns (ReservesResponse memory);
     function getTotalUsdValue() external view returns (uint256);
     function getCashBufferUsdValue() external view returns (uint256);
     function isStale() external view returns (bool);

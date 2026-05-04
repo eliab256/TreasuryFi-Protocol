@@ -8,4 +8,10 @@ library TokenConstants {
     uint256 internal constant SLOT_30Y = 4;
 
     uint256 internal constant PERCENTAGE_PRECISION = 10000;
+
+    /**
+     * @dev The maximum delay for USDC price feed updates, in seconds.
+     * @dev USDC pricefeed can be updated less frequently than the assets in the index, so we allow a longer delay for it.
+     */
+    uint256 public constant MAX_USDC_DELAY = 25 hours;
 }

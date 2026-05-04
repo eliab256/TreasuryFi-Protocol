@@ -4,21 +4,24 @@ pragma solidity ^0.8.0;
 import {ERC3525} from "./ERC3525.sol";
 import {ERC3643} from "./ERC3643.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {RiskManager} from "./RiskManager.sol";
+import {UsdcUsdConverter} from "./UsdcUsdConverter.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {
     IERC20Metadata
 } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import {
-    AggregatorV3Interface
-} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
+
 import {
     IIdentityRegistry
 } from "@t-rex/registry/interface/IIdentityRegistry.sol";
 import {IBondOracle} from "../interfaces/IBondOracle.sol";
 import {IReservesOracle} from "../interfaces/IReservesOracle.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
-import {PositionData} from "../types.sol";
+import {PositionData, TreasuryBondTokenConstructorParams} from "../types.sol";
 import {TokenConstants as C} from "./TokenConstants.sol";
+import {IBondAutomation} from "../interfaces/IBondAutomation.sol";
+import {IReservesAutomation} from "../interfaces/IReservesAutomation.sol";
+
 
 /**
  * @title TreasuryBondToken
@@ -27,7 +30,7 @@ import {TokenConstants as C} from "./TokenConstants.sol";
  * Users can open new positions by depositing USDC and minting tokens, or close positions by burning tokens and withdrawing USDC.
  * The contract includes role-based access control for fee management and administrative functions.
  */
-contract TreasuryBondToken is ERC3643, ERC3525 {
+contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
 
     // Nuovi eventi
     event PositionOpened(address indexed user, uint256 indexed tokenId, uint256 slot, uint256 value, uint256 feeCollected);
@@ -55,16 +58,12 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
     error TreasuryBondToken__WalletNotFrozen();
     error TreasuryBondToken__AmountExceedsAvailableBalance();
     error TreasuryBondToken__AmountShouldBeLessOrEqualToFrozen();
-
     
     uint256 internal constant MAX_PERCENTAGE = 100 * C.PERCENTAGE_PRECISION; // 100% in percentage precision
     uint256 internal constant PERCENTAGE_YIELD_FEE = 10 * C.PERCENTAGE_PRECISION; // 10% fee on yield
     uint256 internal constant PERCENTAGE_ENTRY_FEE = 1 * C.PERCENTAGE_PRECISION; // 1% fee on entry
 
-    IERC20 private immutable i_usdc;
-    AggregatorV3Interface private immutable i_usdcPriceFeed;
-    uint8 private immutable i_usdcDecimals; // 6 for usdc
-    uint8 private immutable i_usdcPriceFeedDecimals; // 8 for chainlink price feed
+    
     uint256 private immutable i_minimumDepositAmount; // 10 USDC
 
     /// @dev liabilities for each slot, updated on mint, burn and yield claim
@@ -74,6 +73,7 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
     uint256 private s_totalFeesCollected;
 
     bytes32 public constant FEES_MANAGER_ROLE = keccak256("FEES_MANAGER_ROLE");
+    bytes32 public constant AUTOMATION_TRIGGERER_ROLE = keccak256("AUTOMATION_TRIGGERER_ROLE");
 
     modifier onlyValidSlot(uint256 slot) {
         _onlyValidSlot(slot);
@@ -86,71 +86,52 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
     }
 
     constructor(
-        string memory _name,
-        string memory _symbol,
-        uint8 _decimals,
-        address _usdcAddress,
-        address _usdcPriceFeedAddress,
-        address _identityRegistry,
-        address _bondAutomation,
-        address _reservesAutomation,
-        address _reservesOracle,
-        address _bondOracle,
-        address _feesCollector
-    ) ERC3643(_name, _symbol, _decimals, address(this), _identityRegistry, address(0)) ERC3525(_decimals)  {
+        TreasuryBondTokenConstructorParams memory _params
+    ) ERC3643(_params.name, _params.symbol, _params.decimalsStandard, address(this), _params.identityRegistry, address(0)) 
+      ERC3525(_params.decimalsStandard) 
+      RiskManager(_params.bondAutomation, _params.reservesAutomation, _params.reservesOracle, _params.bondOracle)
+      UsdcUsdConverter(_params.usdcAddress, _params.usdcPriceFeedAddress, _params.decimalsStandard){
         // Checks for zero addresses
+        
         if (
-            _usdcAddress == address(0) ||
-            _usdcPriceFeedAddress == address(0) ||
-            _feesCollector == address(0) ||
-            _bondAutomation == address(0) ||
-            _reservesAutomation == address(0) ||
-            _reservesOracle == address(0) ||
-            _bondOracle == address(0)
+            _params.usdcAddress == address(0) ||
+            _params.usdcPriceFeedAddress == address(0) ||
+            _params.feesCollector == address(0) ||
+            _params.bondAutomation == address(0) ||
+            _params.reservesAutomation == address(0) ||
+            _params.reservesOracle == address(0) ||
+            _params.bondOracle == address(0)
         ) revert TreasuryBondToken__ZeroAddress();
 
         // ERC165 interface checks for oracles
-        bytes4 bondOracleInterfaceId = type(IBondOracle).interfaceId;
-        if (!IERC165(_bondOracle).supportsInterface(bondOracleInterfaceId)) {
+        if (!IERC165(_params.bondOracle).supportsInterface(type(IBondOracle).interfaceId)) {
             revert TreasuryBondToken__InvalidOracle(
-                _bondOracle,
-                bondOracleInterfaceId
+                _params.bondOracle,
+                type(IBondOracle).interfaceId
             );
         }
-        bytes4 reservesOracleInterfaceId = type(IReservesOracle).interfaceId;
-        if (
-            !IERC165(_reservesOracle).supportsInterface(
-                reservesOracleInterfaceId
-            )
-        ) {
+        if (!IERC165(_params.reservesOracle).supportsInterface(type(IReservesOracle).interfaceId)) {
             revert TreasuryBondToken__InvalidOracle(
-                _reservesOracle,
-                reservesOracleInterfaceId
+                _params.reservesOracle,
+                type(IReservesOracle).interfaceId
             );
         }
 
         // ERC165 interface checks for automations
-        bytes4 bondAutomationInterfaceId = type(IBondAutomation).interfaceId;
-        if (!IERC165(_bondAutomation).supportsInterface(bondAutomationInterfaceId)) {
+        if (!IERC165(_params.bondAutomation).supportsInterface(type(IBondAutomation).interfaceId)) {
             revert TreasuryBondToken__InvalidAutomation(
-                _bondAutomation,
-                bondAutomationInterfaceId
+                _params.bondAutomation,
+                type(IBondAutomation).interfaceId
             );
         }
-
-        bytes4 reservesAutomationInterfaceId = type(IReservesAutomation).interfaceId;
-        if (!IERC165(_reservesAutomation).supportsInterface(reservesAutomationInterfaceId)) {
+        if (!IERC165(_params.reservesAutomation).supportsInterface(type(IReservesAutomation).interfaceId)) {
             revert TreasuryBondToken__InvalidAutomation(
-                _reservesAutomation,
-                reservesAutomationInterfaceId
+                _params.reservesAutomation,
+                type(IReservesAutomation).interfaceId
             );
         }
-
-        _grantRole(FEES_MANAGER_ROLE, _feesCollector);
-        i_usdc = IERC20(_usdcAddress);
-        i_usdcPriceFeed = AggregatorV3Interface(_usdcPriceFeedAddress);
-        i_usdcDecimals = IERC20Metadata(_usdcAddress).decimals();
-        i_usdcPriceFeedDecimals = i_usdcPriceFeed.decimals();
+        _grantRole(FEES_MANAGER_ROLE, _params.feesCollector);
+        _grantRole(AUTOMATION_TRIGGERER_ROLE, msg.sender);
         i_minimumDepositAmount = 10 * (10 ** i_usdcDecimals); // 10 USDC with decimals
 
     }
@@ -160,6 +141,25 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
     ) public view override(ERC3525, AccessControl) returns (bool) {
          return ERC3525.supportsInterface(interfaceId) || AccessControl.supportsInterface(interfaceId);
     }
+
+    /**
+     * @notice Function to manually trigger the reserves upkeep.
+     * @dev Can only be called by an account with the AUTOMATION_TRIGGERER_ROLE.
+     * @dev Internal function inherited from RiskManager.
+     */
+    function triggerReservesUpkeep() public onlyRole(AUTOMATION_TRIGGERER_ROLE) {
+        _triggerReservesUpkeep();
+    }
+
+    /**
+     * @notice Function to manually trigger the bond yields upkeep.
+     * @dev Can only be called by an account with the AUTOMATION_TRIGGERER_ROLE.
+     * @dev Internal function inherited from RiskManager.
+     */
+    function triggerYieldsUpkeep() public onlyRole(AUTOMATION_TRIGGERER_ROLE) {
+        _triggerYieldsUpkeep();
+    }
+
 
     function openNewPosition(
         address _mintTo,
@@ -172,7 +172,7 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
         }
         // 1. ERC-3463 checks
         // 2. TransferFrom caller di usdc _value to this contract
-        // prendere una base fee di ingress
+        // 3. Calculate entry fees and net amount to invest
         (uint256 netAmount, uint256 feeCollected) = _calculateEntryFees(_value);
         // 3. _beforeValueTransfer hook to update internal accounting
         // update total value for the slot
@@ -423,15 +423,7 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
         // feeCollected = (_yieldAmount * PERCENTAGE_YIELD_FEE) / C.PERCENTAGE_PRECISION;
         // netYield = _yieldAmount - feeCollected;
     }
-
-    function _convertUsdcUsd(
-        uint256 _amount,
-        bool _usdcToUsd
-    ) internal view returns (uint256) {
-        // @audit-issue implement convertUsdcUsd function
-        // se _usdcToUsd è true, converti l'amount da USDC a USD usando il price feed di Chainlink
-        // altrimenti converti da USD a USDC
-    }
+    
 
     /**
      * @notice Internal function to validate that a slot is one of the predefined constants.
@@ -518,9 +510,6 @@ contract TreasuryBondToken is ERC3643, ERC3525 {
     function valueDecimals() public view override(ERC3643, ERC3525) returns (uint8) {
         return super.valueDecimals();
     }
-
-
-
 
     // @audit-issue move to a separated risk managment contract
     function getLiabilitiesForAllSlots() external view returns (uint256[4] memory) {

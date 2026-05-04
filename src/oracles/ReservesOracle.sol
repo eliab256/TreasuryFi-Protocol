@@ -99,6 +99,12 @@ contract ReservesOracle is IReservesOracle, ERC165, AccessControl {
         return (block.timestamp - _timestamp) > STALENESS_THRESHOLD;
     }
 
+    function getAllReserves() external view returns (ReservesResponse memory) {
+        ReservesResponse memory reserves = s_reservesResponse;
+        if (_isStale(reserves.timestamp)) revert ReservesOracle__DataIsStale();
+        return reserves;
+    }
+
     function getTotalUsdValue() external view returns (uint256) {
         if (_isStale(s_reservesResponse.timestamp)) revert ReservesOracle__DataIsStale();
         return s_reservesResponse.totalUsdValue;

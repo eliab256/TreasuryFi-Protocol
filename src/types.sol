@@ -30,3 +30,17 @@ struct PositionData {
     uint256 positionMintTimestamp;
     uint256 maturityTimestamp;
 }
+
+struct TreasuryBondTokenConstructorParams {
+    string name;
+    string symbol;
+    uint8 decimalsStandard;
+    address usdcAddress;
+    address usdcPriceFeedAddress;
+    address identityRegistry;
+    address bondAutomation;
+    address reservesAutomation;
+    address reservesOracle;
+    address bondOracle;
+    address feesCollector;
+}
