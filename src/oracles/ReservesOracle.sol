@@ -1,141 +1,101 @@
-//SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import {IReservesOracle} from "../interfaces/IReservesOracle.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {IReservesOracle} from "../interfaces/IReservesOracle.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {ReservesResponse} from "../types.sol";
-import "@openzeppelin/contracts/utils/introspection/ERC165.sol";
 
-contract ReservesOracle is IReservesOracle, ERC165, AccessControl {
+contract ReservesOracle is IReservesOracle, AccessControl {
     using ECDSA for bytes32;
 
-    uint256 internal constant STALENESS_THRESHOLD = 48 hours;
-    uint8 internal constant DECIMALS = 8;
     bytes32 public constant UPDATER_ROLE = keccak256("UPDATER_ROLE");
 
-    ReservesResponse internal s_reservesResponse;
-    address internal s_functionsConsumer;
-    address internal s_reservesSigner;
+    uint256 internal constant STALENESS_THRESHOLD = 48 hours;
 
-    constructor(address _functionsConsumer, address _reservesSigner) {
-        if (_functionsConsumer == address(0) || _reservesSigner == address(0))
-            revert ReservesOracle__ZeroAddress();
+    ReservesResponse internal s_state;
+    address internal s_signer;
+
+    constructor(address consumer, address signer) {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _grantRole(UPDATER_ROLE, _functionsConsumer);
-        s_functionsConsumer = _functionsConsumer;
-        s_reservesSigner = _reservesSigner;
+        _grantRole(UPDATER_ROLE, consumer);
+        s_signer = signer;
     }
 
-
-   function updateUsdValues(
-        uint256[4] memory _usdValues,
-        uint256 _cashUsd,
-        uint256 _timestamp,
-        bytes memory _signature,
-        bytes32 _hash,
-        bytes memory _err
+    // ----------------------------
+    // CORE UPDATE FUNCTION
+    // ----------------------------
+    function updateUsdValues(
+        uint256[4] memory bond,
+        uint256[4] memory cash,
+        uint256 timestamp,
+        bytes memory signature,
+        bytes memory err
     ) external onlyRole(UPDATER_ROLE) {
-        if (_err.length > 0) {
-            emit UsdValueUpdateFailed(_err);
-            return;
-        }
+        if (err.length > 0) return;
 
-        // FIX 3: verifica firma sui dati già decodificati
-        address recovered = ECDSA.recover(_hash, _signature);
-        if (recovered != s_reservesSigner)
+        bytes32 hash = keccak256(
+            abi.encode(bond, cash, timestamp)
+        );
+
+        address recovered = ECDSA.recover(hash, signature);
+        if (recovered != s_signer)
             revert ReservesOracle__InvalidSignature(recovered);
 
-        // somma dei bucket bond
-        uint256 bucketsSum =
-            _usdValues[0] +
-            _usdValues[1] +
-            _usdValues[2] +
-            _usdValues[3];
+        uint256 bondSum =
+            bond[0] + bond[1] + bond[2] + bond[3];
 
-        // totale riserve = bond buckets + liquidità cash
-        uint256 totalUsdValue = bucketsSum + _cashUsd;
+        uint256 cashSum =
+            cash[0] + cash[1] + cash[2] + cash[3];
 
-        // @audit-issue: aggiungere cashUsdValue e totalUsdValue alla struct ReservesResponse in types.sol
-        s_reservesResponse = ReservesResponse({
-            twoYearUsdValue: _usdValues[0],
-            fiveYearUsdValue: _usdValues[1],
-            tenYearUsdValue: _usdValues[2],
-            thirtyYearUsdValue: _usdValues[3],
-            cashBufferUsdValue: _cashUsd,
-            totalUsdValue: totalUsdValue,
-            timestamp: _timestamp
+        s_state = ReservesResponse({
+            twoYearUsdValue: bond[0],
+            fiveYearUsdValue: bond[1],
+            tenYearUsdValue: bond[2],
+            thirtyYearUsdValue: bond[3],
+
+            twoYearCashValue: cash[0],
+            fiveYearCashValue: cash[1],
+            tenYearCashValue: cash[2],
+            thirtyYearCashValue: cash[3],
+
+            cashBufferUsdValue: cashSum,
+            totalUsdValue: bondSum + cashSum,
+            timestamp: timestamp
         });
 
         emit UsdValueUpdated(
-            _usdValues[0],
-            _usdValues[1],
-            _usdValues[2],
-            _usdValues[3],
-            _cashUsd,
-            totalUsdValue,
-            _timestamp
+            bond[0],
+            bond[1],
+            bond[2],
+            bond[3],
+            bondSum + cashSum,
+            timestamp
         );
     }
 
-
-    function getReserveUsdValue(uint256 _slot) external view returns (uint256) {
-        ReservesResponse memory usdValues = s_reservesResponse;
-        if (_isStale(usdValues.timestamp)) revert ReservesOracle__DataIsStale();
-
-        if (_slot == 1) return usdValues.twoYearUsdValue;
-        if (_slot == 2) return usdValues.fiveYearUsdValue;
-        if (_slot == 3) return usdValues.tenYearUsdValue;
-        if (_slot == 4) return usdValues.thirtyYearUsdValue;
-
-        revert ReservesOracle__InvalidSlot();
-    }
-
-    function isStale() public view returns (bool) {
-        return _isStale(s_reservesResponse.timestamp);
-    }
-
-    function _isStale(uint256 _timestamp) internal view returns (bool) {
-        return (block.timestamp - _timestamp) > STALENESS_THRESHOLD;
-    }
-
+    // ----------------------------
+    // READ FUNCTIONS
+    // ----------------------------
     function getAllReserves() external view returns (ReservesResponse memory) {
-        ReservesResponse memory reserves = s_reservesResponse;
-        if (_isStale(reserves.timestamp)) revert ReservesOracle__DataIsStale();
-        return reserves;
+        require(!_isStale(), "stale data");
+        return s_state;
     }
 
     function getTotalUsdValue() external view returns (uint256) {
-        if (_isStale(s_reservesResponse.timestamp)) revert ReservesOracle__DataIsStale();
-        return s_reservesResponse.totalUsdValue;
+        require(!_isStale(), "stale data");
+        return s_state.totalUsdValue;
     }
 
-    function getCashBufferUsdValue() external view returns (uint256) {
-        if (_isStale(s_reservesResponse.timestamp)) revert ReservesOracle__DataIsStale();
-        return s_reservesResponse.cashBufferUsdValue;
+    function isStale() external view returns (bool) {
+        return _isStale();
     }
 
-    function getDecimals() public pure returns (uint8) {
-        return DECIMALS;
+    function _isStale() internal view returns (bool) {
+        return block.timestamp - s_state.timestamp > STALENESS_THRESHOLD;
     }
 
     function getLastUpdatedTimestamp() public view returns (uint256) {
-        return s_reservesResponse.timestamp;
-    }
-
-    function getFunctionsConsumer() public view returns (address) {
-        return s_functionsConsumer;
-    }
-
-    function getReservesSigner() public view returns (address) {
-        return s_reservesSigner;
-    }
-
-    function supportsInterface(
-        bytes4 interfaceId
-    ) public view virtual override(AccessControl, ERC165) returns (bool) {
-        return
-            interfaceId == type(IReservesOracle).interfaceId ||
-            super.supportsInterface(interfaceId);
+        return s_state.timestamp;
     }
 }

@@ -36,7 +36,7 @@ abstract contract RiskManager {
     uint256 internal s_lastUpkeepTriggerYields;
     
     /// @dev Mapping to track possible shocks from oracle data for each slot
-    mapping(uint256 => uint64) internal s_lastValidYieldPerSlot;
+    mapping(uint256 => uint256) internal s_lastValidYieldPerSlot;
 
     /// @dev to freeze specific slots in case of detected shock or oracle malfunction without needing to pause the entire contract, updated by governance or an automated mechanism in case of shock detection
     mapping(uint256 => bool) internal s_slotFrozen; 
@@ -135,7 +135,7 @@ abstract contract RiskManager {
 /////////////////////////////////////////////////////////////////////
 
     // Lo yield non cambia a ogni tx ma a ogni aggiornamento dell' oracolo
-    function _validSingleYield(uint256 _slot, uint64 _yield) private view returns (bool) {
+    function _validSingleYield(uint256 _slot, uint256 _yield) private view returns (bool) {
 
     }
 
@@ -144,7 +144,7 @@ abstract contract RiskManager {
     }
 
 
-    function _updateLastValidYield(uint256 _slot, uint64 _yield) private returns (bool freezeSlot) {
+    function _updateLastValidYield(uint256 _slot, uint256 _yield) private returns (bool freezeSlot) {
         if (_yield == 0 || _yield > MAX_YIELD) {
             freezeSlot = true;
             emit InvalidYield(_slot, _yield);

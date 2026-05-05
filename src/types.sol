@@ -2,20 +2,27 @@
 pragma solidity ^0.8.0;
 
 struct BondYieldsResponse {
-    uint64 twoYearYield;
-    uint64 fiveYearYield;
-    uint64 tenYearYield;
-    uint64 thirtyYearYield;
+    uint256 twoYearYield;
+    uint256 fiveYearYield;
+    uint256 tenYearYield;
+    uint256 thirtyYearYield;
     uint256 timestamp;
 }
 
 struct ReservesResponse {
+    // Bond buckets — mark-to-market of bond for each slot (8 decimals)
     uint256 twoYearUsdValue;
     uint256 fiveYearUsdValue;
     uint256 tenYearUsdValue;
     uint256 thirtyYearUsdValue;
-    uint256 cashBufferUsdValue;
-    uint256 totalUsdValue;
+    // Cash buckets — available liquidity per slot (8 decimals)
+    uint256 twoYearCashValue;
+    uint256 fiveYearCashValue;
+    uint256 tenYearCashValue;
+    uint256 thirtyYearCashValue;
+    // Aggregated values
+    uint256 cashBufferUsdValue; // sum of the 4 cash buckets (8 decimals)
+    uint256 totalUsdValue;      // sum of the 4 bond buckets (8 decimals)
     uint256 timestamp;
 }
 

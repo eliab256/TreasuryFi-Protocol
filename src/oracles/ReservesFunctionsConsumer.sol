@@ -1,92 +1,66 @@
-//SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import {
-    IReservesFunctionsConsumer
-} from "../interfaces/IReservesFunctionsConsumer.sol";
-import {IReservesOracle} from "../interfaces/IReservesOracle.sol";
-import {
-    FunctionsClient
-} from "@chainlink/contracts/src/v0.8/functions/v1_3_0/FunctionsClient.sol";
-import {
-    FunctionsRequest
-} from "@chainlink/contracts/src/v0.8/functions/v1_0_0/libraries/FunctionsRequest.sol";
+import {FunctionsClient} from "@chainlink/contracts/src/v0.8/functions/v1_3_0/FunctionsClient.sol";
+import {FunctionsRequest} from "@chainlink/contracts/src/v0.8/functions/v1_0_0/libraries/FunctionsRequest.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {IReservesOracle} from "../interfaces/IReservesOracle.sol";
 
-contract ReservesFunctionsConsumer is
-    IReservesFunctionsConsumer,
-    FunctionsClient,
-    AccessControl
-{
+contract ReservesFunctionsConsumer is FunctionsClient, AccessControl {
     using FunctionsRequest for FunctionsRequest.Request;
 
-    //roles
     bytes32 public constant UPDATER_ROLE = keccak256("UPDATER_ROLE");
 
-    // callback gas limit
     uint32 internal immutable i_gasLimit;
     bytes32 internal immutable i_donID;
-    address internal immutable i_reservesOracle;
+    address internal immutable i_oracle;
 
-    // State variables (all internal)
     bytes32 internal s_lastRequestId;
-    bytes internal s_lastResponse;
-    bytes internal s_lastError;
     uint64 internal s_subscriptionId;
-    address internal s_authorizedCaller;
-
-    // @audit-issue modificare l'url con quello definitivo del server SPV
-     string internal constant source =
-        'const url = "https://your-spv.vercel.app/api/usdValues";'
-        "const response = await Functions.makeHttpRequest({ url });"
-        "const decimals = 8;"
-        "if (response.error) {"
-        '  throw Error("SPV fetch failed");'
-        "}"
-        "const data = response.data.data;"
-        "const signature = response.data.signature;"
-        "const encoded = Functions.encodeString(JSON.stringify(data));"
-        "const hash = Functions.keccak256(encoded);"
-        "return Functions.encodeAbi("
-        '  ["uint256[4]", "uint256", "uint256", "bytes", "bytes32"],'
-        "  ["
-        "    ["
-        '      Math.round(data.usdValue_by_bucket["2Y"]  * 10 ** decimals),'
-        '      Math.round(data.usdValue_by_bucket["5Y"]  * 10 ** decimals),'
-        '      Math.round(data.usdValue_by_bucket["10Y"] * 10 ** decimals),'
-        '      Math.round(data.usdValue_by_bucket["30Y"] * 10 ** decimals)'
-        "    ],"
-        "    Math.round(data.cash_usd * 10 ** decimals),"
-        "    data.timestamp,"
-        "    signature,"
-        "    hash"
-        "  ]"
-        ");";
 
     constructor(
-        address _router,
-        bytes32 _donID,
-        uint32 _gasLimit,
-        address _reservesOracle
-    ) FunctionsClient(_router)  {
-        if (_reservesOracle == address(0))
-            revert ReservesFunctionsConsumer__ZeroAddress();
-        i_donID = _donID;
-        i_gasLimit = _gasLimit;
-        i_reservesOracle = _reservesOracle;
+        address router,
+        bytes32 donID,
+        uint32 gasLimit,
+        address oracle
+    ) FunctionsClient(router) {
+        i_donID = donID;
+        i_gasLimit = gasLimit;
+        i_oracle = oracle;
+
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(UPDATER_ROLE, msg.sender);
     }
 
-    function setSubscriptionId(uint64 _subscriptionId) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        s_subscriptionId = _subscriptionId;
-        emit SubscriptionIdSet(_subscriptionId);
+    // ----------------------------
+    // JS SOURCE (NORMALIZATION LAYER)
+    // ----------------------------
+    string internal constant source =
+        'const url="https://your-spv.vercel.app/api/usdValues";'
+        "const r=await Functions.makeHttpRequest({url});"
+        "if(r.error)throw Error('SPV fail');"
+        "const d=r.data.data;"
+        "const sig=r.data.signature;"
+        "function c(v){const p=v.split('.');return BigInt(p[0]+((p[1]||'00')+'00').slice(0,2));}"
+        "const bond=["
+        "c(d.usdValue_by_bucket['2Y']),"
+        "c(d.usdValue_by_bucket['5Y']),"
+        "c(d.usdValue_by_bucket['10Y']),"
+        "c(d.usdValue_by_bucket['30Y'])"
+        "];"
+        "const cash=["
+        "c(d.cash_usd_by_bucket['2Y']),"
+        "c(d.cash_usd_by_bucket['5Y']),"
+        "c(d.cash_usd_by_bucket['10Y']),"
+        "c(d.cash_usd_by_bucket['30Y'])"
+        "];"
+        "return Functions.encodeAbi(['uint256[4]','uint256[4]','uint256','bytes'],[bond,cash,d.timestamp,sig]);";
+
+    function setSubscriptionId(uint64 id) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        s_subscriptionId = id;
     }
 
-    function sendRequest() external onlyRole(UPDATER_ROLE) returns (bytes32 requestId) {
-        if (s_subscriptionId == 0)
-            revert ReservesFunctionsConsumer__InvalidSubscriptionId();
-
+    function sendRequest() external onlyRole(UPDATER_ROLE) returns (bytes32) {
         FunctionsRequest.Request memory req;
         req.initializeRequestForInlineJavaScript(source);
 
@@ -105,66 +79,43 @@ contract ReservesFunctionsConsumer is
         bytes memory response,
         bytes memory err
     ) internal override {
-        if (s_lastRequestId != requestId)
-            revert ReservesFunctionsConsumer__UnexpectedRequestID(requestId);
+        require(requestId == s_lastRequestId, "bad request");
 
-        s_lastResponse = response;
-        s_lastError = err;
+        if (err.length > 0) return;
 
-        uint256 timestamp = 0;
+        (
+            uint256[4] memory bond,
+            uint256[4] memory cash,
+            uint256 timestamp,
+            bytes memory signature
+        ) = abi.decode(response, (uint256[4], uint256[4], uint256, bytes));
 
-        if (err.length == 0 && response.length > 0) {
-            (
-                uint256[4] memory usdValues,
-                uint256 cashUsd,
-                uint256 ts,
-                bytes memory signature,
-                bytes32 hash
-            ) = abi.decode(
-                response,
-                (uint256[4], uint256, uint256, bytes, bytes32)
-            );
-
-            timestamp = ts;
-
-            try
-                IReservesOracle(i_reservesOracle).updateUsdValues(
-                    usdValues,
-                    cashUsd,
-                    ts,
-                    signature,
-                    hash,
-                    err
-                )
-            {} catch (bytes memory oracleErr) {
-                emit OracleUpdateFailed(oracleErr);
-            }
-        } else {
-            try
-                IReservesOracle(i_reservesOracle).updateUsdValues(
-                    [uint256(0), 0, 0, 0],
-                    0,
-                    0,
-                    "",
-                    bytes32(0),
-                    err
-                )
-            {} catch {}
-        }
-
-        emit Response(requestId, timestamp, response, err);
+        IReservesOracle(i_oracle).updateUsdValues(
+            bond,
+            cash,
+            timestamp,
+            signature,
+            err
+        );
     }
 
-    // --- Getters ---
-    function getLastRequestId() external view returns (bytes32) { return s_lastRequestId; }
-    function getLastResponse() external view returns (bytes memory) { return s_lastResponse; }
-    function getLastError() external view returns (bytes memory) { return s_lastError; }
-    function getSubscriptionId() external view returns (uint64) { return s_subscriptionId; }
-    function getAuthorizedCaller() external view returns (address) { return s_authorizedCaller; }
-    function getGasLimit() external view returns (uint32) { return i_gasLimit; }
-    function getDonID() external view returns (bytes32) { return i_donID; }
-    function getSource() external pure returns (string memory) { return source; }
-    function getReservesOracle() external view returns (address) { return i_reservesOracle; }
+    function getLastRequestId() external view returns (bytes32) {
+        return s_lastRequestId;
+    }
 
-   
+    function getSubscriptionId() external view returns (uint64) {
+        return s_subscriptionId;
+    }
+
+    function getGasLimit() external view returns (uint32) {
+        return i_gasLimit;
+    }
+
+    function getDonID() external view returns (bytes32) {
+        return i_donID;
+    }
+
+    function getOracle() external view returns (address) {
+        return i_oracle;
+    }
 }

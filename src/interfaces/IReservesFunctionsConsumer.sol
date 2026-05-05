@@ -7,15 +7,12 @@ interface IReservesFunctionsConsumer {
     error ReservesFunctionsConsumer__NotAuthorized();
     error ReservesFunctionsConsumer__InvalidSubscriptionId();
     error ReservesFunctionsConsumer__ZeroAddress();
-    error ReservesFunctionsConsumer__IncompleteResponse(uint256 length);
 
     // Events
-    event AuthorizedCallerSet(address indexed caller);
     event SubscriptionIdSet(uint64 indexed subscriptionId);
-    event OracleUpdateFailed(bytes err);
     event Response(
         bytes32 indexed requestId,
-        uint256 indexed timestampResponse,
+        uint256 indexed timestamp,
         bytes response,
         bytes err
     );
@@ -28,12 +25,8 @@ interface IReservesFunctionsConsumer {
 
     // Getters
     function getLastRequestId() external view returns (bytes32);
-    function getLastResponse() external view returns (bytes memory);
-    function getLastError() external view returns (bytes memory);
     function getSubscriptionId() external view returns (uint64);
     function getGasLimit() external view returns (uint32);
     function getDonID() external view returns (bytes32);
-    function getSource() external pure returns (string memory);
-    function getAuthorizedCaller() external view returns (address);
-    function getReservesOracle() external view returns (address);
+    function getOracle() external view returns (address);
 }
