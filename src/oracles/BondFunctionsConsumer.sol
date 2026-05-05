@@ -35,6 +35,12 @@ contract BondFunctionsConsumer is
     address internal s_authorizedCaller; // BondAutomation contract
 
     // JavaScript source code
+    /**
+     * @notice The JavaScript code to be executed by the Chainlink Functions node. 
+     *         It fetches the latest yields for 2Y, 5Y, 10Y, and 30Y US Treasury bonds 
+     *         from the FRED API, processes the data, and returns it in an encoded format.
+     * @dev The code returns yields value multiplied by 100 to avoid decimals.
+     */
     string internal constant source =
         'const series=["DGS2","DGS5","DGS10","DGS30"];'
         "const responses=await Promise.all(series.map((id)=>Functions.makeHttpRequest({url:`https://api.stlouisfed.org/fred/series/observations?series_id=${id}&api_key=${secrets.FRED_API_KEY}&file_type=json&sort_order=desc&limit=1`})));"
