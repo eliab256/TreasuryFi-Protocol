@@ -49,18 +49,18 @@ contract ReservesOracle is IReservesOracle, AccessControl {
             cash[0] + cash[1] + cash[2] + cash[3];
 
         s_state = ReservesResponse({
-            twoYearUsdValue: bond[0],
-            fiveYearUsdValue: bond[1],
-            tenYearUsdValue: bond[2],
-            thirtyYearUsdValue: bond[3],
+            twoYearUsdBondsValue: bond[0],
+            fiveYearUsdBondsValue: bond[1],
+            tenYearUsdBondsValue: bond[2],
+            thirtyYearUsdBondsValue: bond[3],
 
-            twoYearCashValue: cash[0],
-            fiveYearCashValue: cash[1],
-            tenYearCashValue: cash[2],
-            thirtyYearCashValue: cash[3],
+            twoYearUsdCashValue: cash[0],
+            fiveYearUsdCashValue: cash[1],
+            tenYearUsdCashValue: cash[2],
+            thirtyYearUsdCashValue: cash[3],
 
-            cashBufferUsdValue: cashSum,
-            totalUsdValue: bondSum + cashSum,
+            cashBufferUsdTotalValue: cashSum,
+            totalUsdBondsValue: bondSum + cashSum,
             timestamp: timestamp
         });
 
@@ -84,7 +84,7 @@ contract ReservesOracle is IReservesOracle, AccessControl {
 
     function getTotalUsdValue() external view returns (uint256) {
         require(!_isStale(), "stale data");
-        return s_state.totalUsdValue;
+        return s_state.totalUsdBondsValue;
     }
 
     function isStale() external view returns (bool) {

@@ -16,6 +16,7 @@ abstract contract RiskManager {
     error RiskManager__SlotAlreadyFrozen(uint256 slot);
     error RiskManager__SlotNotFrozen(uint256 slot);
     error RiskManager__SlotFrozen(uint256 slot);
+    error RiskManager__SlotAlreadyInState(uint256 slot, bool frozen);
 
     event SlotFrozen(uint256 indexed slot);
     event SlotUnfrozen(uint256 indexed slot);
@@ -121,20 +122,50 @@ abstract contract RiskManager {
         }
     }
 
-    function _freezeSlot(uint256 _slot) internal {
-        if (s_slotFrozen[_slot]) revert RiskManager__SlotAlreadyFrozen(_slot);
-        s_slotFrozen[_slot] = true;
-        emit SlotFrozen(_slot);
+    function _setSlotFrozen(uint256 _slot, bool _frozen) private {
+        if (s_slotFrozen[_slot] == _frozen) return;
+        s_slotFrozen[_slot] = _frozen;
+        if (_frozen) emit SlotFrozen(_slot);
+        else emit SlotUnfrozen(_slot);
     }
 
-    function _unfreezeSlot(uint256 _slot) internal {
-        if (!s_slotFrozen[_slot]) revert RiskManager__SlotNotFrozen(_slot);
-        s_slotFrozen[_slot] = false;
-        emit SlotUnfrozen(_slot);
+    /**
+     * @notice Sets the frozen state of a slot, implement access control on the main contract
+     * @param _slot The slot to update
+     * @param _frozen The new frozen state
+     */
+    function _setSlotFrozenOnMainContract(uint256 _slot, bool _frozen) internal {
+    if (s_slotFrozen[_slot] == _frozen) revert RiskManager__SlotAlreadyInState(_slot, _frozen);
+    _setSlotFrozen(_slot, _frozen);
     }
 
     function _getTotalLiabilitiesForSlot(uint256 _slot) internal view returns (uint256) {
         return s_totalLiabilitiesPerSlot[_slot];
+    }
+
+////////////////////////////////////////////////////////////////////
+////////////////// update yields and reserves ////////////////////// 
+////////////////////////////////////////////////////////////////////  
+
+    // add role
+    function _updateYieldsValues() internal {
+        (BondYieldsResponse memory yieldsResponse, bool freezeNeededYields, bool freezeSlot1, bool freezeSlot2, bool freezeSlot3, bool freezeSlot4) = _updateLastValidYields();
+        if(freezeNeededYields){
+            _setSlotFrozen(C.SLOT_2Y, freezeSlot1);
+            _setSlotFrozen(C.SLOT_5Y, freezeSlot2);
+            _setSlotFrozen(C.SLOT_10Y, freezeSlot3);
+            _setSlotFrozen(C.SLOT_30Y, freezeSlot4);
+        }
+    }
+
+    function _updateReservesValues() internal {
+        (ReservesResponse memory reservesResponse, bool freezeNeededReserves, bool freezeSlot1Reserves, bool freezeSlot2Reserves, bool freezeSlot3Reserves, bool freezeSlot4Reserves) = _updateLastValidReserves();
+        if(freezeNeededReserves){
+            _setSlotFrozen(C.SLOT_2Y, freezeSlot1Reserves);
+            _setSlotFrozen(C.SLOT_5Y, freezeSlot2Reserves);
+            _setSlotFrozen(C.SLOT_10Y, freezeSlot3Reserves);
+            _setSlotFrozen(C.SLOT_30Y, freezeSlot4Reserves);
+        }
     }
 
 
@@ -332,46 +363,18 @@ abstract contract RiskManager {
 
     function _beforeOpenNewPosition(uint256 _slot, uint256 _value) internal {
         // 1.  Retrieve latest bond yields and reserves data from oracles (freshness checks are done in the oracles)
-        (BondYieldsResponse memory yieldsResponse, bool freezeNeededYields, bool freezeSlot1, bool freezeSlot2, bool freezeSlot3, bool freezeSlot4) = _updateLastValidYields();
-        (ReservesResponse memory reservesResponse, bool freezeNeededReserves, bool freezeSlot1Reserves, bool freezeSlot2Reserves, bool freezeSlot3Reserves, bool freezeSlot4Reserves) = _updateLastValidReserves();
-        // 2. Freeze slot if needed based on yields or reserves validation
-        if(freezeNeededYields || freezeNeededReserves){
-            if(freezeSlot1 || freezeSlot1Reserves) _freezeSlot(C.SLOT_2Y);
-            if(freezeSlot2 || freezeSlot2Reserves) _freezeSlot(C.SLOT_5Y);
-            if(freezeSlot3 || freezeSlot3Reserves) _freezeSlot(C.SLOT_10Y);
-            if(freezeSlot4 || freezeSlot4Reserves) _freezeSlot(C.SLOT_30Y);
-        }
         
-        
-        // 3. Check if the new total liabilities for the slot after minting would exceed the reserves, if yes revert
         
     }
 
     function _beforeRedeeming(uint256 _slot, uint256 _value) internal {
         // 1.  Retrieve latest bond yields and reserves data from oracles (freshness checks are done in the oracles)
-        (BondYieldsResponse memory yieldsResponse, bool freezeNeededYields, bool freezeSlot1, bool freezeSlot2, bool freezeSlot3, bool freezeSlot4) = _updateLastValidYields();
-        (ReservesResponse memory reservesResponse, bool freezeNeededReserves, bool freezeSlot1Reserves, bool freezeSlot2Reserves, bool freezeSlot3Reserves, bool freezeSlot4Reserves) = _updateLastValidReserves();
-        // 2. Freeze slot if needed based on yields or reserves validation
-        if(freezeNeededYields || freezeNeededReserves){
-            if(freezeSlot1 || freezeSlot1Reserves) _freezeSlot(C.SLOT_2Y);
-            if(freezeSlot2 || freezeSlot2Reserves) _freezeSlot(C.SLOT_5Y);
-            if(freezeSlot3 || freezeSlot3Reserves) _freezeSlot(C.SLOT_10Y);
-            if(freezeSlot4 || freezeSlot4Reserves) _freezeSlot(C.SLOT_30Y);
-        }
+       
     }
 
     // claimibg yield trigger before mint, attenzione
     function _beforeClaimingYield(uint256 _slot, uint256 _value) internal {
         // 1.  Retrieve latest bond yields and reserves data from oracles (freshness checks are done in the oracles)
-        (BondYieldsResponse memory yieldsResponse, bool freezeNeededYields, bool freezeSlot1, bool freezeSlot2, bool freezeSlot3, bool freezeSlot4) = _updateLastValidYields();
-        (ReservesResponse memory reservesResponse, bool freezeNeededReserves, bool freezeSlot1Reserves, bool freezeSlot2Reserves, bool freezeSlot3Reserves, bool freezeSlot4Reserves) = _updateLastValidReserves();
-
-        // 2. Check if the slot is frozen, if yes revert
-        if (s_slotFrozen[_slot]) {
-            revert RiskManager__SlotFrozen(_slot);
-        }
-
-        // 3. Check if the new total liabilities for the slot after minting would exceed the reserves, if yes revert
     }
 
 

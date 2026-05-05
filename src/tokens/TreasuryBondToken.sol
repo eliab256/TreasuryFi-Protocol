@@ -74,6 +74,7 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
 
     bytes32 public constant FEES_MANAGER_ROLE = keccak256("FEES_MANAGER_ROLE");
     bytes32 public constant AUTOMATION_TRIGGERER_ROLE = keccak256("AUTOMATION_TRIGGERER_ROLE");
+    bytes32 public constant UPDATE_RISK_MANAGER_VALUES_ROLE = keccak256("UPDATE_RISK_MANAGER_VALUES_ROLE");
 
     modifier onlyValidSlot(uint256 slot) {
         _onlyValidSlot(slot);
@@ -100,7 +101,8 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
             _params.bondAutomation == address(0) ||
             _params.reservesAutomation == address(0) ||
             _params.reservesOracle == address(0) ||
-            _params.bondOracle == address(0)
+            _params.bondOracle == address(0) ||
+            _params.updateRiskManagerAutomation == address(0)
         ) revert TreasuryBondToken__ZeroAddress();
 
         // ERC165 interface checks for oracles
@@ -132,6 +134,8 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
         }
         _grantRole(FEES_MANAGER_ROLE, _params.feesCollector);
         _grantRole(AUTOMATION_TRIGGERER_ROLE, msg.sender);
+        _grantRole(UPDATE_RISK_MANAGER_VALUES_ROLE, _params.updateRiskManagerAutomation);
+        _grantRole(UPDATE_RISK_MANAGER_VALUES_ROLE, msg.sender);
         i_minimumDepositAmount = 10 * (10 ** i_usdcDecimals); // 10 USDC with decimals
 
     }
@@ -160,6 +164,18 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
         _triggerYieldsUpkeep();
     }
 
+    /**
+     * @notice Function to manually trigger the update of risk manager values.
+     * @dev Can only be called by an account with the UPDATE_RISK_MANAGER_VALUES_ROLE.
+     * @dev Internal function inherited from RiskManager.
+     */
+    function updateYieldsValues() public onlyRole(UPDATE_RISK_MANAGER_VALUES_ROLE) {
+        _updateYieldsValues();
+    }
+
+    function updateReserveValues() public onlyRole(UPDATE_RISK_MANAGER_VALUES_ROLE) {
+        _updateReservesValues();
+    }
 
     function openNewPosition(
         address _mintTo,
