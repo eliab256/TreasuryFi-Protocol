@@ -94,17 +94,23 @@ interface IRiskManager {
     function performUpkeep(bytes calldata performData) external onlyRole(AUTOMATION_ADMIN_ROLE) {
         (bool yieldsUpdateNeeded, bool reservesUpdateNeeded) = abi.decode(performData, (bool, bool));
 
+         uint256 yieldsTimestamp = IBondOracle(i_bondYieldsOracle).getLastUpdatedTimestamp();
+         uint256 reservesTimestamp = IReservesOracle(i_reservesOracle).getLastUpdatedTimestamp();
+    
+        yieldsUpdateNeeded = yieldsUpdateNeeded && (yieldsTimestamp > s_lastYieldsUpdate);
+        reservesUpdateNeeded = reservesUpdateNeeded && (reservesTimestamp > s_lastReserveUpdate);
+
         if (!yieldsUpdateNeeded && !reservesUpdateNeeded) {
             revert UpdateRiskManager__UpkeepNotNeeded();
         }
 
         if (yieldsUpdateNeeded) {
             IRiskManager(i_tokenContract).updateYieldsValues();
-            s_lastYieldsUpdate = block.timestamp;
+            s_lastYieldsUpdate = yieldsTimestamp;
         }
         if (reservesUpdateNeeded) {
             IRiskManager(i_tokenContract).updateReserveValues();
-            s_lastReserveUpdate = block.timestamp;
+            s_lastReserveUpdate = reservesTimestamp;
         }
 
         if (msg.sender != s_chainlinkForwarder) {

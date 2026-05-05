@@ -87,12 +87,9 @@ abstract contract ERC3643 is AccessControl {
         setCompliance(_compliance);
     }
 
-    /**
-     *  @dev See {IToken-setIdentityRegistry}.
-     */
-    function setIdentityRegistry(
+    function _setIdentityRegistry(
         address _identityRegistry
-    ) public onlyRole(OWNER_ROLE) {
+    ) internal {
          if (_identityRegistry == address(0)) revert ERC3643__ZeroAddress();
         s_tokenIdentityRegistry = IIdentityRegistry(_identityRegistry);
         emit IdentityRegistryAdded(_identityRegistry);
@@ -110,7 +107,8 @@ abstract contract ERC3643 is AccessControl {
         emit UpdatedTokenInformation(s_name, _symbol, valueDecimals(), TOKEN_VERSION, s_tokenOnchainID);
     }
 
-    function setOnchainID(address _onchainID) external onlyRole(OWNER_ROLE) {
+    function _setOnchainID(address _onchainID) internal {
+        if (_onchainID == address(0)) revert ERC3643__ZeroAddress();
         s_tokenOnchainID = _onchainID;
         emit UpdatedTokenInformation(s_name, s_symbol, valueDecimals(), TOKEN_VERSION, _onchainID);
     }
@@ -175,52 +173,20 @@ abstract contract ERC3643 is AccessControl {
         address newWallet
     ) internal virtual;
 
-    function pause() external onlyRole(OWNER_ROLE) {
+    function _pause() internal {
         _whenNotPaused();
         s_tokenPaused = true;
         emit Paused(msg.sender);
     }
 
-    function unpause() external onlyRole(OWNER_ROLE) {
+    function _unpause() internal {
         _whenPaused();
         s_tokenPaused = false;
         emit Unpaused(msg.sender);
     }
 
 
-    function setAddressFrozen(address _userAddress, bool _freeze) external onlyRole(OWNER_ROLE) {
-        _setAddressFrozen(_userAddress, _freeze);
-    }
-
-
-    function freezePartialTokens(uint256 _tokenId, uint256 _amount) external onlyRole(OWNER_ROLE) {
-        _freezePartialToken(_tokenId, _amount);
-    }
-
-    function unfreezePartialTokens(uint256 _tokenId, uint256 _amount) external onlyRole(OWNER_ROLE) {
-        _unfreezePartialToken(_tokenId, _amount);
-    }
-
-    function batchSetAddressFrozen(address[] calldata _userAddresses, bool[] calldata _freeze) external {
-        for (uint256 i = 0; i < _userAddresses.length; i++) {
-            _setAddressFrozen(_userAddresses[i], _freeze[i]);
-        }
-    }
-
-
-    function batchFreezePartialTokens(uint256[] calldata _tokenId, uint256[] calldata _amounts) external {
-        for (uint256 i = 0; i < _tokenId.length; i++) {
-            _freezePartialToken(_tokenId[i], _amounts[i]);
-        }
-    }
-
-
-    function batchUnfreezePartialTokens(uint256[] calldata _tokenId, uint256[] calldata _amounts) external {
-        for (uint256 i = 0; i < _tokenId.length; i++) {
-            _unfreezePartialToken(_tokenId[i], _amounts[i]);
-        }
-    }
-
+    
     /**
      * @notice Public wrapper necessary for try/catch functionality.
      * @dev Solidity requires that calls in try/catch blocks are external. We use `this.` to make an external call to the contract itself.
@@ -283,7 +249,7 @@ abstract contract ERC3643 is AccessControl {
         }
     }
 
-    function setCompliance(address _compliance) public onlyRole(OWNER_ROLE) {
+    function _setCompliance(address _compliance) internal {
         if (address(s_tokenCompliance) != address(0)) {
             s_tokenCompliance.unbindToken(address(this));
         }
@@ -291,6 +257,11 @@ abstract contract ERC3643 is AccessControl {
         s_tokenCompliance.bindToken(address(this));
         emit ComplianceAdded(_compliance);
     }
+
+////////////////////////////////////////////////////////////////////
+///////////////////////////// Getters ////////////////////////////// 
+////////////////////////////////////////////////////////////////////  
+
 
     function compliance() external view  returns (IModularCompliance) {
         return s_tokenCompliance;
@@ -313,7 +284,7 @@ abstract contract ERC3643 is AccessControl {
     }
 
     function getFrozenValue(uint256 _tokenId) public view returns (uint256) {
-    return s_frozenValues[_tokenId];
+        return s_frozenValues[_tokenId];
     }
 
     function getAvailableValue(uint256 _tokenId) public view returns (uint256) {

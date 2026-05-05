@@ -89,9 +89,9 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
     constructor(
         TreasuryBondTokenConstructorParams memory _params
     ) ERC3643(_params.name, _params.symbol, _params.decimalsStandard, address(this), _params.identityRegistry, address(0)) 
-      ERC3525(_params.decimalsStandard) 
-      RiskManager(_params.bondAutomation, _params.reservesAutomation, _params.reservesOracle, _params.bondOracle)
-      UsdcUsdConverter(_params.usdcAddress, _params.usdcPriceFeedAddress, _params.decimalsStandard){
+    ERC3525(_params.decimalsStandard) 
+    RiskManager(_params.bondAutomation, _params.reservesAutomation, _params.reservesOracle, _params.bondOracle)
+    UsdcUsdConverter(_params.usdcAddress, _params.usdcPriceFeedAddress, _params.decimalsStandard){
         // Checks for zero addresses
         
         if (
@@ -146,6 +146,92 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
          return ERC3525.supportsInterface(interfaceId) || AccessControl.supportsInterface(interfaceId);
     }
 
+////////////////////////////////////////////////////////////////////
+/////////////////////// ERC3643 inheritance //////////////////////// 
+////////////////////////////////////////////////////////////////////  
+     
+    function setIdentityRegistry(address _identityRegistry) public onlyRole(OWNER_ROLE) {
+        _setIdentityRegistry(_identityRegistry);
+    }
+
+    function setOnchainID(address _onchainID) public onlyRole(OWNER_ROLE) {
+        _setOnchainID(_onchainID);
+    }
+
+    function setCompliance(address _compliance) public onlyRole(OWNER_ROLE) {
+        _setCompliance(_compliance);
+    }
+
+    function _executeRecoveryTransfer(
+        address lostWallet,
+        address newWallet
+    ) internal override {
+        // balanceOf(address) returns the number of ERC721 tokens owned by the address, so if it's 0 it means there are no tokens to recover
+        uint256 tokenCount = balanceOf(lostWallet);
+
+        // id snaphot BEFORE transfer to avoid issues with token enumeration after transfer
+        uint256[] memory tokenIds = new uint256[](tokenCount);
+        for (uint256 i = 0; i < tokenCount; i++) {
+            tokenIds[i] = tokenOfOwnerByIndex(lostWallet, i);
+        }
+
+        for (uint256 i = 0; i < tokenIds.length; i++) {
+            uint256 tokenId = tokenIds[i];
+
+            // Frozen values are mapped by tokenId, they follow the token automatically,
+            // no need to migrate them (the mapping s_frozenValues[tokenId] remains unchanged).
+
+            // _transferTokenId is internal in ERC3525 and bypasses the onlyApprovedOrOwner check
+            _transferTokenId(lostWallet, newWallet, tokenId);
+        }
+    }
+
+    function pause () public onlyRole(OWNER_ROLE) {
+        _pause();
+    }
+
+    function unpause () public onlyRole(OWNER_ROLE) {
+        _unpause();
+    }
+
+    function setAddressFrozen(address _userAddress, bool _freeze) external onlyRole(OWNER_ROLE) {
+        _setAddressFrozen(_userAddress, _freeze);
+    }
+
+
+    function freezePartialTokens(uint256 _tokenId, uint256 _amount) external onlyRole(OWNER_ROLE) {
+        _freezePartialToken(_tokenId, _amount);
+    }
+
+    function unfreezePartialTokens(uint256 _tokenId, uint256 _amount) external onlyRole(OWNER_ROLE) {
+        _unfreezePartialToken(_tokenId, _amount);
+    }
+
+    function batchSetAddressFrozen(address[] calldata _userAddresses, bool[] calldata _freeze) external onlyRole(OWNER_ROLE) {
+        for (uint256 i = 0; i < _userAddresses.length; i++) {
+            _setAddressFrozen(_userAddresses[i], _freeze[i]);
+        }
+    }
+
+
+    function batchFreezePartialTokens(uint256[] calldata _tokenId, uint256[] calldata _amounts) external onlyRole(OWNER_ROLE) {
+        for (uint256 i = 0; i < _tokenId.length; i++) {
+            _freezePartialToken(_tokenId[i], _amounts[i]);
+        }
+    }
+
+
+    function batchUnfreezePartialTokens(uint256[] calldata _tokenId, uint256[] calldata _amounts) external onlyRole(OWNER_ROLE) {
+        for (uint256 i = 0; i < _tokenId.length; i++) {
+            _unfreezePartialToken(_tokenId[i], _amounts[i]);
+        }
+    }
+
+
+////////////////////////////////////////////////////////////////////
+///////////////////// RiskManager inheritance ////////////////////// 
+////////////////////////////////////////////////////////////////////  
+
     /**
      * @notice Function to manually trigger the reserves upkeep.
      * @dev Can only be called by an account with the AUTOMATION_TRIGGERER_ROLE.
@@ -165,10 +251,11 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
     }
 
     /**
-     * @notice Function to manually trigger the update of risk manager values.
-     * @dev Can only be called by an account with the UPDATE_RISK_MANAGER_VALUES_ROLE.
-     * @dev Internal function inherited from RiskManager.
-     */
+    * @notice Updates the risk manager yields values from the oracle.
+    * @dev Normally called by UpdateRiskManagerAutomation via UPDATE_RISK_MANAGER_VALUES_ROLE.
+    * The deployer retains this role as emergency fallback in case Chainlink Automation
+    * stops functioning, allowing manual intervention without governance delay.
+    */
     function updateYieldsValues() public onlyRole(UPDATE_RISK_MANAGER_VALUES_ROLE) {
         _updateYieldsValues();
     }
@@ -177,6 +264,9 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
         _updateReservesValues();
     }
 
+////////////////////////////////////////////////////////////////////
+/////////////////// Positions related functions //////////////////// 
+////////////////////////////////////////////////////////////////////  
     function openNewPosition(
         address _mintTo,
         uint256 _slot,
@@ -296,6 +386,9 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
         _claimYield(_tokenId);
     }
 
+////////////////////////////////////////////////////////////////////
+/////////////////// Internal functions //////////////////// 
+////////////////////////////////////////////////////////////////////  
 
     function _mint(
             address _mintTo,
@@ -373,30 +466,7 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
     }
 
 
-    /// @inheritdoc ERC3643
-    function _executeRecoveryTransfer(
-        address lostWallet,
-        address newWallet
-    ) internal override {
-        // balanceOf(address) returns the number of ERC721 tokens owned by the address, so if it's 0 it means there are no tokens to recover
-        uint256 tokenCount = balanceOf(lostWallet);
 
-        // id snaphot BEFORE transfer to avoid issues with token enumeration after transfer
-        uint256[] memory tokenIds = new uint256[](tokenCount);
-        for (uint256 i = 0; i < tokenCount; i++) {
-            tokenIds[i] = tokenOfOwnerByIndex(lostWallet, i);
-        }
-
-        for (uint256 i = 0; i < tokenIds.length; i++) {
-            uint256 tokenId = tokenIds[i];
-
-            // Frozen values are mapped by tokenId, they follow the token automatically,
-            // no need to migrate them (the mapping s_frozenValues[tokenId] remains unchanged).
-
-            // _transferTokenId is internal in ERC3525 and bypasses the onlyApprovedOrOwner check
-            _transferTokenId(lostWallet, newWallet, tokenId);
-        }
-    }
 
     /**
      * @notice Hook that is called after any transfer of value. This includes minting and burning.
@@ -463,6 +533,11 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
         }
     }
 
+
+////////////////////////////////////////////////////////////////////
+///////////////////////// public getters /////////////////////////// 
+////////////////////////////////////////////////////////////////////  
+
     function ownerOf(uint256 tokenId) public view override returns (address) {
         return super.ownerOf(tokenId);
     }
@@ -520,15 +595,5 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
     function valueDecimals() public view override(ERC3643, ERC3525) returns (uint8) {
         return super.valueDecimals();
     }
-
-    // @audit-issue move to a separated risk managment contract
-    // function getLiabilitiesForAllSlots() external view returns (uint256[4] memory) {
-    //     uint256[4] memory liabilities;
-    //     liabilities[0] = s_totalValuePerSlot[C.SLOT_2Y];
-    //     liabilities[1] = s_totalValuePerSlot[C.SLOT_5Y];
-    //     liabilities[2] = s_totalValuePerSlot[C.SLOT_10Y];
-    //     liabilities[3] = s_totalValuePerSlot[C.SLOT_30Y];
-    //     return liabilities;
-    // }
 
 }
