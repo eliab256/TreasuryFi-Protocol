@@ -16,7 +16,9 @@ interface IBaseAutomation is AutomationCompatibleInterface, IAccessControl {
 
     // --- Errors ---
     error BaseAutomation__ChainlinkForwarderAddressAlreadySet();
+    error BaseAutomation__InvalidForwarderAddress();
     error BaseAutomation__ChainlinkUpkeepIdAlreadySet();
+    error BaseAutomation__InvalidUpkeepId();
     error BaseAutomation__OnlyChainlinkAutomationOrOwner();
     error BaseAutomation__OnlyChainlinkAutomation();
     error BaseAutomation__UpkeepNotNeeded();

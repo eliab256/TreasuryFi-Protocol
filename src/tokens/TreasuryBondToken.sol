@@ -459,15 +459,15 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
     }
 
     /**
-     * @notice Returns the total value deposited for a specific bond slot (maturity).
+     * @notice Returns the total liabilities for a specific bond slot (maturity).
      * @dev Each slot represents a different bond maturity (2Y, 5Y, 10Y, 30Y).
      * @param _slot The slot ID representing the bond maturity.
-     * @return The total value (in USDC) deposited in the specified slot.
+     * @return The total liabilities (in USDC) for the specified slot.
      */
-    function getTotalValuePerSlot(
+    function getTotalLiabilitiesPerSlot(
         uint256 _slot
     ) external view onlyValidSlot(_slot) returns (uint256) {
-        return s_totalValuePerSlot[_slot];
+        return _getTotalLiabilitiesForSlot(_slot);
     }
 
 
@@ -493,11 +493,6 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
         return s_totalFeesCollected;
     }
 
-
-    function getLiabilitiesForSlot(uint256 _slot) external view onlyValidSlot(_slot) returns (uint256) {
-         return s_totalValuePerSlot[_slot];
-    }
-
     function name() public view override returns (string memory) {
         return super.name();
     }
@@ -511,13 +506,13 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
     }
 
     // @audit-issue move to a separated risk managment contract
-    function getLiabilitiesForAllSlots() external view returns (uint256[4] memory) {
-        uint256[4] memory liabilities;
-        liabilities[0] = s_totalValuePerSlot[C.SLOT_2Y];
-        liabilities[1] = s_totalValuePerSlot[C.SLOT_5Y];
-        liabilities[2] = s_totalValuePerSlot[C.SLOT_10Y];
-        liabilities[3] = s_totalValuePerSlot[C.SLOT_30Y];
-        return liabilities;
-    }
+    // function getLiabilitiesForAllSlots() external view returns (uint256[4] memory) {
+    //     uint256[4] memory liabilities;
+    //     liabilities[0] = s_totalValuePerSlot[C.SLOT_2Y];
+    //     liabilities[1] = s_totalValuePerSlot[C.SLOT_5Y];
+    //     liabilities[2] = s_totalValuePerSlot[C.SLOT_10Y];
+    //     liabilities[3] = s_totalValuePerSlot[C.SLOT_30Y];
+    //     return liabilities;
+    // }
 
 }

@@ -13,6 +13,14 @@ abstract contract RiskManager {
     error RiskManager__ExcessiveYieldShock(uint256 slot, uint256 shock);
     error RiskManager__ZeroAddress();
     error RiskManager__AutomationGracePeriodNotElapsed();
+    error RiskManager__SlotAlreadyFrozen(uint256 slot);
+    error RiskManager__SlotNotFrozen(uint256 slot);
+    error RiskManager__SlotFrozen(uint256 slot);
+
+    event SlotFrozen(uint256 indexed slot);
+    event SlotUnfrozen(uint256 indexed slot);
+    event InvalidYield(uint256 indexed slot, uint256 yield);
+    event ExcessiveYieldShock(uint256 indexed slot, uint256 shock);
 
     uint256 internal constant MAX_YIELD_SHOCK_BPS = 5 * C.PERCENTAGE_PRECISION; // 5% shock
     uint256 internal constant MAX_YIELD = 20 * C.PERCENTAGE_PRECISION; // 20% max yield for sanity checks
@@ -34,7 +42,7 @@ abstract contract RiskManager {
     mapping(uint256 => bool) internal s_slotFrozen; 
 
     /// @dev liabilities for each slot, updated on mint, burn and yield claim
-    mapping(uint256 => uint256) private s_totalValuePerSlot;
+    mapping(uint256 => uint256) private s_totalLiabilitiesPerSlot;
 
     BondYieldsResponse internal s_lastValidYields;
     ReservesResponse internal s_lastValidReserves;
@@ -117,6 +125,10 @@ abstract contract RiskManager {
         emit SlotUnfrozen(_slot);
     }
 
+    function _getTotalLiabilitiesForSlot(uint256 _slot) internal view returns (uint256) {
+        return s_totalLiabilitiesPerSlot[_slot];
+    }
+
 
 /////////////////////////////////////////////////////////////////////
 ///////////////////////// Yields validation /////////////////////////
@@ -132,7 +144,7 @@ abstract contract RiskManager {
     }
 
 
-    function _updateLastValidYield(uint256 _slot, uint256 _yield) private returns (bool freezeSlot) {
+    function _updateLastValidYield(uint256 _slot, uint64 _yield) private returns (bool freezeSlot) {
         if (_yield == 0 || _yield > MAX_YIELD) {
             freezeSlot = true;
             emit InvalidYield(_slot, _yield);
@@ -200,7 +212,7 @@ abstract contract RiskManager {
         return mixedYieldsResponse;
     }
 
-    function _updateLastValidReserves () private {
+    function _updateLastValidReserves () private returns (ReservesResponse memory) {
         uint256 lastUpdateTimestamp= i_reservesOracle.getLastUpdatedTimestamp();
     }
 

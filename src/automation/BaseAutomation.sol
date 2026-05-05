@@ -33,6 +33,8 @@ abstract contract BaseAutomation is IBaseAutomation, AccessControl {
     function setChainlinkForwarder(
         address _chainlinkForwarder
     ) external onlyRole(AUTOMATION_ADMIN_ROLE) {
+        if (_chainlinkForwarder == address(0)) revert BaseAutomation__InvalidForwarderAddress();
+
         if (s_chainlinkForwarder != address(0)) {
             revert BaseAutomation__ChainlinkForwarderAddressAlreadySet();
         }
@@ -46,6 +48,8 @@ abstract contract BaseAutomation is IBaseAutomation, AccessControl {
     function setUpkeepId(
         uint256 _upkeepId
     ) external onlyRole(AUTOMATION_ADMIN_ROLE) {
+        if (_upkeepId == 0) revert BaseAutomation__InvalidUpkeepId();
+
         if (s_upkeepId != 0) {
             revert BaseAutomation__ChainlinkUpkeepIdAlreadySet();
         }
@@ -82,14 +86,16 @@ abstract contract BaseAutomation is IBaseAutomation, AccessControl {
                 revert BaseAutomation__OnlyChainlinkAutomation();
             }
         } else {
-            // After grace period: only Chainlink Automation or admin can call
             if (
                 msg.sender != address(s_chainlinkForwarder) &&
                 !hasRole(AUTOMATION_ADMIN_ROLE, msg.sender)
             ) {
                 revert BaseAutomation__OnlyChainlinkAutomationOrOwner();
             }
-            emit ManualUpkeepExecuted(msg.sender, block.timestamp);
+
+            if (msg.sender != address(s_chainlinkForwarder)) {
+                emit ManualUpkeepExecuted(msg.sender, block.timestamp);
+            }
         }
 
         s_lastUpkeep = block.timestamp;
