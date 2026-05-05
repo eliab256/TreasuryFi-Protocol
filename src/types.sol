@@ -11,18 +11,18 @@ struct BondYieldsResponse {
 
 struct ReservesResponse {
     // Bond buckets — mark-to-market of bond for each slot (8 decimals)
-    uint256 twoYearUsdValue;
-    uint256 fiveYearUsdValue;
-    uint256 tenYearUsdValue;
-    uint256 thirtyYearUsdValue;
+    uint256 twoYearUsdBondsValue;
+    uint256 fiveYearUsdBondsValue;
+    uint256 tenYearUsdBondsValue;
+    uint256 thirtyYearUsdBondsValue;
     // Cash buckets — available liquidity per slot (8 decimals)
-    uint256 twoYearCashValue;
-    uint256 fiveYearCashValue;
-    uint256 tenYearCashValue;
-    uint256 thirtyYearCashValue;
+    uint256 twoYearUsdCashValue;
+    uint256 fiveYearUsdCashValue;
+    uint256 tenYearUsdCashValue;
+    uint256 thirtyYearUsdCashValue;
     // Aggregated values
-    uint256 cashBufferUsdValue; // sum of the 4 cash buckets (8 decimals)
-    uint256 totalUsdValue;      // sum of the 4 bond buckets (8 decimals)
+    uint256 cashBufferUsdTotalValue; // sum of the 4 cash buckets (8 decimals)
+    uint256 totalUsdBondsValue;      // sum of the 4 bond buckets (8 decimals)
     uint256 timestamp;
 }
 

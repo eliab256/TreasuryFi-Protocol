@@ -24,6 +24,7 @@ abstract contract RiskManager {
 
     uint256 internal constant MAX_YIELD_SHOCK_BPS = 5 * C.PERCENTAGE_PRECISION; // 5% shock
     uint256 internal constant MAX_YIELD = 20 * C.PERCENTAGE_PRECISION; // 20% max yield for sanity checks
+    uint256 internal constant MAX_RESERVES_SHOCK_BPS = 30 * C.PERCENTAGE_PRECISION; // 30% shock
     IBondAutomation internal immutable i_yieldsAutomation;
     IReservesAutomation internal immutable i_reservesAutomation;
 
@@ -38,17 +39,24 @@ abstract contract RiskManager {
     /// @dev Mapping to track possible shocks from oracle data for each slot
     mapping(uint256 => uint256) internal s_lastValidYieldPerSlot;
 
+    /// @dev Mapping to track possible shocks from oracle data for each slot
+    mapping(uint256 => uint256) internal s_lastValidReservePerSlot;
+
+    /// @dev Mapping to track possible shocks from oracle data for each slot
+    mapping(uint256 => uint256) internal s_lastValidCashBufferPerSlot;
+
     /// @dev to freeze specific slots in case of detected shock or oracle malfunction without needing to pause the entire contract, updated by governance or an automated mechanism in case of shock detection
     mapping(uint256 => bool) internal s_slotFrozen; 
 
     /// @dev liabilities for each slot, updated on mint, burn and yield claim
     mapping(uint256 => uint256) private s_totalLiabilitiesPerSlot;
 
+    // @audit-issue forse queste struct si possono eliminar e passare ad avere i mapping
     BondYieldsResponse internal s_lastValidYields;
     ReservesResponse internal s_lastValidReserves;
 
     /**
-         * @notice Constructor to initialize the RiskManager with references to automation and oracle contracts.
+     * @notice Constructor to initialize the RiskManager with references to automation and oracle contracts.
          * @dev All addresses checks are done on the main contract
          * @param _yieldsAutomation Address of the BondAutomation contract.
          * @param _reservesAutomation Address of the ReservesAutomation contract.
@@ -134,17 +142,28 @@ abstract contract RiskManager {
 ///////////////////////// Yields validation /////////////////////////
 /////////////////////////////////////////////////////////////////////
 
-    // Lo yield non cambia a ogni tx ma a ogni aggiornamento dell' oracolo
-    function _validSingleYield(uint256 _slot, uint256 _yield) private view returns (bool) {
-
+    function _validateAndUpdateLastValidReserve(uint256 _slot, uint256 _reserve) private  returns (bool freezeSlot) {
+        if(_reserve == 0) {
+            freezeSlot = true;
+            emit InvalidYield(_slot, _reserve);
+            return freezeSlot;
+        }
+        uint256 lastValidReserve = s_lastValidReservePerSlot[_slot];
+        if(lastValidReserve != 0) {
+            uint256 shock = _reserve > lastValidReserve ? _reserve - lastValidReserve : 
+            lastValidReserve - _reserve;
+            if (shock > MAX_RESERVES_SHOCK_BPS) {
+                freezeSlot = true;
+                emit ExcessiveYieldShock(_slot, shock);
+                return freezeSlot;
+            }
+        }
+        s_lastValidReservePerSlot[_slot] = _reserve;
+        freezeSlot = false;
     }
 
-    function _validateSingleReserve(uint256 _slot) private view returns (bool) {
 
-    }
-
-
-    function _updateLastValidYield(uint256 _slot, uint256 _yield) private returns (bool freezeSlot) {
+    function _validateAndUpdateLastValidYield(uint256 _slot, uint256 _yield) private returns (bool freezeSlot) {
         if (_yield == 0 || _yield > MAX_YIELD) {
             freezeSlot = true;
             emit InvalidYield(_slot, _yield);
@@ -161,13 +180,46 @@ abstract contract RiskManager {
             }
         }
         s_lastValidYieldPerSlot[_slot] = _yield;
-        return false;
+        freezeSlot = false;
+    }
+
+    function _validateAndUpdateLastValidCashBuffer(uint256 _slot, uint256 _cashBuffer) private returns (bool freezeSlot){
+        if (_cashBuffer == 0) {
+            freezeSlot = true;
+            emit InvalidYield(_slot, _cashBuffer);
+            return freezeSlot;
+        }
+        uint256 lastValidCashBuffer = s_lastValidCashBufferPerSlot[_slot];
+        if(lastValidCashBuffer != 0) {
+            uint256 shock = _cashBuffer > lastValidCashBuffer ? _cashBuffer - lastValidCashBuffer : 
+            lastValidCashBuffer - _cashBuffer;
+            if (shock > MAX_RESERVES_SHOCK_BPS) {
+                freezeSlot = true;
+                emit ExcessiveYieldShock(_slot, shock);
+                return freezeSlot;
+            }
+        }
+        s_lastValidCashBufferPerSlot[_slot] = _cashBuffer;
+        freezeSlot = false;
     }
 
 ////////////////////////////////////////////////////////////////////
 /////////////////////// Oracles Data Getter //////////////////////// 
 ////////////////////////////////////////////////////////////////////  
-    function _updateLastValidYields() private returns (BondYieldsResponse memory) {
+
+    /**
+     * @notice Retrieves the most recent valid bond yields, applying per-slot anomaly detection.
+     * @dev Compares the oracle's latest timestamp against the cached `s_lastValidYields` timestamp.
+     *      If the oracle has no newer data, the cached struct is returned immediately (no storage write).
+     *      Otherwise, each slot (2Y, 5Y, 10Y, 30Y) is independently validated via `_updateLastValidYield`:
+     *      - If all slots are healthy, `s_lastValidYields` is updated to the fresh oracle data.
+     *      - If one or more slots trigger an anomaly, the affected slots are frozen via `_freezeSlot`
+     *        and a mixed response is built: frozen slots retain their last valid value while healthy
+     *        slots receive the new oracle value. The mixed struct is then persisted to storage.
+     * @return A `BondYieldsResponse` struct containing the best available yields for each maturity.
+     *         Frozen slots will hold their last known good value until manually unfrozen.
+     */
+    function _updateLastValidYields() private returns (BondYieldsResponse memory, bool freezeNeeded, bool freezeSlot1, bool freezeSlot2, bool freezeSlot3, bool freezeSlot4) {
         // 1. Declare cache struct
         BondYieldsResponse memory yieldResponseCached = s_lastValidYields;
 
@@ -176,29 +228,24 @@ abstract contract RiskManager {
 
         // 3. No update needed — return cache directly without touching storage
         if (yieldResponseCached.timestamp >= lastUpdateTimestamp) {
-            return yieldResponseCached;
+           // return cached response with freezeNeeded false, all other flags will not be used
+            return (yieldResponseCached,false, false, false, false, false);
         }
 
         // 4. Retrieve new data and validate each slot
         BondYieldsResponse memory newYieldsResponse = i_yieldsOracle.getAllYields();
-        bool freezeSlot1 = _updateLastValidYield(C.SLOT_2Y,  newYieldsResponse.twoYearYield);
-        bool freezeSlot2 = _updateLastValidYield(C.SLOT_5Y,  newYieldsResponse.fiveYearYield);
-        bool freezeSlot3 = _updateLastValidYield(C.SLOT_10Y, newYieldsResponse.tenYearYield);
-        bool freezeSlot4 = _updateLastValidYield(C.SLOT_30Y, newYieldsResponse.thirtyYearYield);
+         freezeSlot1 = _validateAndUpdateLastValidYield(C.SLOT_2Y,  newYieldsResponse.twoYearYield);
+         freezeSlot2 = _validateAndUpdateLastValidYield(C.SLOT_5Y,  newYieldsResponse.fiveYearYield);
+         freezeSlot3 = _validateAndUpdateLastValidYield(C.SLOT_10Y, newYieldsResponse.tenYearYield);
+         freezeSlot4 = _validateAndUpdateLastValidYield(C.SLOT_30Y, newYieldsResponse.thirtyYearYield);
 
-        // 5. No freeze — all slots valid, update storage and return new data directly
+        // 5. No freeze all slots valid, update storage and return new data directly 
         if (!freezeSlot1 && !freezeSlot2 && !freezeSlot3 && !freezeSlot4) {
             s_lastValidYields = newYieldsResponse;
-            return newYieldsResponse;
+            return (newYieldsResponse, true,  freezeSlot1, freezeSlot2, freezeSlot3, freezeSlot4);
         }
 
-        // 6. At least one slot frozen, freeze flagged slots
-        if (freezeSlot1) _freezeSlot(C.SLOT_2Y);
-        if (freezeSlot2) _freezeSlot(C.SLOT_5Y);
-        if (freezeSlot3) _freezeSlot(C.SLOT_10Y);
-        if (freezeSlot4) _freezeSlot(C.SLOT_30Y);
-
-        // 7. Build mixed response, keep old values for frozen slots, new values for healthy ones
+        // 6. Build mixed response, keep old values for frozen slots, new values for healthy ones
         BondYieldsResponse memory mixedYieldsResponse = BondYieldsResponse({
             twoYearYield:    freezeSlot1 ? yieldResponseCached.twoYearYield    : newYieldsResponse.twoYearYield,
             fiveYearYield:   freezeSlot2 ? yieldResponseCached.fiveYearYield   : newYieldsResponse.fiveYearYield,
@@ -207,13 +254,75 @@ abstract contract RiskManager {
             timestamp:       yieldResponseCached.timestamp
         });
 
-        // 8. Update storage with mixed response and return mixed response
+        // 7. Update storage with mixed response and return mixed response
         s_lastValidYields = mixedYieldsResponse;
-        return mixedYieldsResponse;
+        return (mixedYieldsResponse, true,  freezeSlot1, freezeSlot2, freezeSlot3, freezeSlot4);
     }
 
-    function _updateLastValidReserves () private returns (ReservesResponse memory) {
+    function _updateLastValidReserves () private returns (ReservesResponse memory, bool freezeNeeded, bool freezeSlot1, bool freezeSlot2, bool freezeSlot3, bool freezeSlot4) {
+        
+        // 1. Declare cache struct
+        ReservesResponse memory reservesResponseCached = s_lastValidReserves;
+
+        // 2. Check if oracle data is newer than the last valid data we have
         uint256 lastUpdateTimestamp= i_reservesOracle.getLastUpdatedTimestamp();
+
+        // 3. No update needed — return cache directly without touching storage
+        if (reservesResponseCached.timestamp >= lastUpdateTimestamp) {
+            // return cached response with freezeNeeded false, all other flags will not be used
+            return (reservesResponseCached,false, false, false, false, false);
+        }
+
+        // 4. Retrieve new data 
+        ReservesResponse memory newReservesResponse = i_reservesOracle.getAllReserves();
+
+        // 5. Validate each reserve slot, if shock freeze slot is true
+        freezeSlot1 = _validateAndUpdateLastValidReserve(C.SLOT_2Y,  newReservesResponse.twoYearUsdBondsValue);
+        freezeSlot2 = _validateAndUpdateLastValidReserve(C.SLOT_5Y,  newReservesResponse.fiveYearUsdBondsValue);
+        freezeSlot3 = _validateAndUpdateLastValidReserve(C.SLOT_10Y, newReservesResponse.tenYearUsdBondsValue);
+        freezeSlot4 = _validateAndUpdateLastValidReserve(C.SLOT_30Y, newReservesResponse.thirtyYearUsdBondsValue);
+
+        // 6. Validate cash buffer, if shock freeze slot is true
+        if(!freezeSlot1){
+            freezeSlot1 = _validateAndUpdateLastValidCashBuffer(C.SLOT_2Y,  newReservesResponse.twoYearUsdCashValue);
+        }
+        if(!freezeSlot2){
+            freezeSlot2 = _validateAndUpdateLastValidCashBuffer(C.SLOT_5Y,  newReservesResponse.fiveYearUsdCashValue);
+        }
+        if(!freezeSlot3){
+            freezeSlot3 = _validateAndUpdateLastValidCashBuffer(C.SLOT_10Y, newReservesResponse.tenYearUsdCashValue);
+        }
+        if(!freezeSlot4){
+            freezeSlot4 = _validateAndUpdateLastValidCashBuffer(C.SLOT_30Y, newReservesResponse.thirtyYearUsdCashValue);
+        }
+
+        // 6. At least one slot frozen, freeze flagged slots
+        if (!freezeSlot1 && !freezeSlot2 && !freezeSlot3 && !freezeSlot4) {
+            s_lastValidReserves = newReservesResponse;
+            return (newReservesResponse, true,  freezeSlot1, freezeSlot2, freezeSlot3, freezeSlot4);
+        }         
+ 
+        // 7. Build mixed response, keep old values for frozen slots, new values for healthy ones
+        ReservesResponse memory mixedReservesResponse = ReservesResponse({
+            twoYearUsdBondsValue:    freezeSlot1 ? reservesResponseCached.twoYearUsdBondsValue    : newReservesResponse.twoYearUsdBondsValue,
+            fiveYearUsdBondsValue:   freezeSlot2 ? reservesResponseCached.fiveYearUsdBondsValue   : newReservesResponse.fiveYearUsdBondsValue,
+            tenYearUsdBondsValue:    freezeSlot3 ? reservesResponseCached.tenYearUsdBondsValue    : newReservesResponse.tenYearUsdBondsValue,
+            thirtyYearUsdBondsValue: freezeSlot4 ? reservesResponseCached.thirtyYearUsdBondsValue : newReservesResponse.thirtyYearUsdBondsValue,
+
+            twoYearUsdCashValue:    freezeSlot1 ? reservesResponseCached.twoYearUsdCashValue    : newReservesResponse.twoYearUsdCashValue,
+            fiveYearUsdCashValue:   freezeSlot2 ? reservesResponseCached.fiveYearUsdCashValue   : newReservesResponse.fiveYearUsdCashValue,
+            tenYearUsdCashValue:    freezeSlot3 ? reservesResponseCached.tenYearUsdCashValue    : newReservesResponse.tenYearUsdCashValue,
+            thirtyYearUsdCashValue: freezeSlot4 ? reservesResponseCached.thirtyYearUsdCashValue : newReservesResponse.thirtyYearUsdCashValue,
+
+            cashBufferUsdTotalValue:  freezeSlot1 ? reservesResponseCached.cashBufferUsdTotalValue  : newReservesResponse.cashBufferUsdTotalValue,
+            totalUsdBondsValue:       freezeSlot1 && freezeSlot2 && freezeSlot3 && freezeSlot4 ? reservesResponseCached.totalUsdBondsValue : newReservesResponse.totalUsdBondsValue,
+            timestamp:          reservesResponseCached.timestamp
+        });
+
+        // 8. Update storage with mixed response and return mixed response
+        s_lastValidReserves = mixedReservesResponse;
+        return (mixedReservesResponse, true,  freezeSlot1, freezeSlot2, freezeSlot3, freezeSlot4);
+        
     }
 
 
@@ -221,14 +330,18 @@ abstract contract RiskManager {
 ///////////////////////// Lifecycle Hooks ////////////////////////// 
 ////////////////////////////////////////////////////////////////////  
 
-    function _beforeMinting(uint256 _slot, uint256 _value) internal {
+    function _beforeOpenNewPosition(uint256 _slot, uint256 _value) internal {
         // 1.  Retrieve latest bond yields and reserves data from oracles (freshness checks are done in the oracles)
-        BondYieldsResponse memory yieldsResponse = _updateLastValidYields();
-        ReservesResponse memory reservesResponse = _updateLastValidReserves();
-        // 2. Check if the slot is frozen, if yes revert
-        if (s_slotFrozen[_slot]) {
-            revert RiskManager__SlotFrozen(_slot);
+        (BondYieldsResponse memory yieldsResponse, bool freezeNeededYields, bool freezeSlot1, bool freezeSlot2, bool freezeSlot3, bool freezeSlot4) = _updateLastValidYields();
+        (ReservesResponse memory reservesResponse, bool freezeNeededReserves, bool freezeSlot1Reserves, bool freezeSlot2Reserves, bool freezeSlot3Reserves, bool freezeSlot4Reserves) = _updateLastValidReserves();
+        // 2. Freeze slot if needed based on yields or reserves validation
+        if(freezeNeededYields || freezeNeededReserves){
+            if(freezeSlot1 || freezeSlot1Reserves) _freezeSlot(C.SLOT_2Y);
+            if(freezeSlot2 || freezeSlot2Reserves) _freezeSlot(C.SLOT_5Y);
+            if(freezeSlot3 || freezeSlot3Reserves) _freezeSlot(C.SLOT_10Y);
+            if(freezeSlot4 || freezeSlot4Reserves) _freezeSlot(C.SLOT_30Y);
         }
+        
         
         // 3. Check if the new total liabilities for the slot after minting would exceed the reserves, if yes revert
         
@@ -236,19 +349,22 @@ abstract contract RiskManager {
 
     function _beforeRedeeming(uint256 _slot, uint256 _value) internal {
         // 1.  Retrieve latest bond yields and reserves data from oracles (freshness checks are done in the oracles)
-        BondYieldsResponse memory yieldsResponse = _updateLastValidYields();
-        ReservesResponse memory reservesResponse = _updateLastValidReserves();
-
-        // 2. Check if the slot is frozen, if yes revert
-        if (s_slotFrozen[_slot]) {
-            revert RiskManager__SlotFrozen(_slot);
+        (BondYieldsResponse memory yieldsResponse, bool freezeNeededYields, bool freezeSlot1, bool freezeSlot2, bool freezeSlot3, bool freezeSlot4) = _updateLastValidYields();
+        (ReservesResponse memory reservesResponse, bool freezeNeededReserves, bool freezeSlot1Reserves, bool freezeSlot2Reserves, bool freezeSlot3Reserves, bool freezeSlot4Reserves) = _updateLastValidReserves();
+        // 2. Freeze slot if needed based on yields or reserves validation
+        if(freezeNeededYields || freezeNeededReserves){
+            if(freezeSlot1 || freezeSlot1Reserves) _freezeSlot(C.SLOT_2Y);
+            if(freezeSlot2 || freezeSlot2Reserves) _freezeSlot(C.SLOT_5Y);
+            if(freezeSlot3 || freezeSlot3Reserves) _freezeSlot(C.SLOT_10Y);
+            if(freezeSlot4 || freezeSlot4Reserves) _freezeSlot(C.SLOT_30Y);
         }
     }
 
+    // claimibg yield trigger before mint, attenzione
     function _beforeClaimingYield(uint256 _slot, uint256 _value) internal {
         // 1.  Retrieve latest bond yields and reserves data from oracles (freshness checks are done in the oracles)
-        BondYieldsResponse memory yieldsResponse = _updateLastValidYields();
-        ReservesResponse memory reservesResponse = _updateLastValidReserves();
+        (BondYieldsResponse memory yieldsResponse, bool freezeNeededYields, bool freezeSlot1, bool freezeSlot2, bool freezeSlot3, bool freezeSlot4) = _updateLastValidYields();
+        (ReservesResponse memory reservesResponse, bool freezeNeededReserves, bool freezeSlot1Reserves, bool freezeSlot2Reserves, bool freezeSlot3Reserves, bool freezeSlot4Reserves) = _updateLastValidReserves();
 
         // 2. Check if the slot is frozen, if yes revert
         if (s_slotFrozen[_slot]) {
