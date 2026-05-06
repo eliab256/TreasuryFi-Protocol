@@ -53,7 +53,10 @@ abstract contract RiskManager {
     mapping(uint256 => uint256) internal s_lastValidCashBufferPerSlot;
 
     /// @dev to freeze specific slots in case of detected shock or oracle malfunction without needing to pause the entire contract, updated by governance or an automated mechanism in case of shock detection
-    mapping(uint256 => bool) internal s_slotFrozen; 
+    mapping(uint256 => bool) internal s_slotFrozenByYields;
+    mapping(uint256 => bool) internal s_slotFrozenByReserves;
+    /// @dev global mapping to check if a slot is frozen, like false || false = false
+    mapping(uint256 => bool) internal s_slotFrozen;
 
     /// @dev liabilities for each slot, updated on mint, burn and yield claim
     mapping(uint256 => uint256) private s_totalLiabilitiesPerSlot;
@@ -118,7 +121,6 @@ abstract contract RiskManager {
         }
     }
 
-
     function _checkManualTriggerNeeded(uint256 lastTriggerTimestamp) private view returns (bool) {
         if (block.timestamp > lastTriggerTimestamp + i_interval + i_gracePeriod) {
             return true;
@@ -130,6 +132,18 @@ abstract contract RiskManager {
 ////////////////////////////////////////////////////////////////////
 ////////////////////// freeze slots functions ////////////////////// 
 ////////////////////////////////////////////////////////////////////  
+    function _setYieldsSlotFrozen(uint256 _slot, bool _frozen) private {
+        s_slotFrozenByYields[_slot] = _frozen;    
+        bool shouldBeFrozen = _frozen || s_slotFrozenByReserves[_slot];
+        _setSlotFrozen(_slot, shouldBeFrozen);
+    }
+
+    function _setReservesSlotFrozen(uint256 _slot, bool _frozen) private {
+        s_slotFrozenByReserves[_slot] = _frozen;
+        bool shouldBeFrozen = _frozen || s_slotFrozenByYields[_slot];
+        _setSlotFrozen(_slot, shouldBeFrozen);
+    }
+
     function _setSlotFrozen(uint256 _slot, bool _frozen) private {
         if (s_slotFrozen[_slot] == _frozen) return;
         s_slotFrozen[_slot] = _frozen;
@@ -144,23 +158,25 @@ abstract contract RiskManager {
      */
     function _setSlotFrozenOnMainContract(uint256 _slot, bool _frozen) internal {
         if (s_slotFrozen[_slot] == _frozen) revert RiskManager__SlotAlreadyInState(_slot, _frozen);
+        s_slotFrozenByYields[_slot] = _frozen;
+        s_slotFrozenByReserves[_slot] = _frozen;
         _setSlotFrozen(_slot, _frozen);
     }
 
     function _freezeNonAvailableYieldsSlots() private {
         (bool freezeSlot1, bool freezeSlot2, bool freezeSlot3, bool freezeSlot4) = _updateLastValidYields();
-        _setSlotFrozen(C.SLOT_2Y,  freezeSlot1);
-        _setSlotFrozen(C.SLOT_5Y,  freezeSlot2);
-        _setSlotFrozen(C.SLOT_10Y, freezeSlot3);
-        _setSlotFrozen(C.SLOT_30Y, freezeSlot4);
+        _setYieldsSlotFrozen(C.SLOT_2Y,  freezeSlot1);
+        _setYieldsSlotFrozen(C.SLOT_5Y,  freezeSlot2);
+        _setYieldsSlotFrozen(C.SLOT_10Y, freezeSlot3);
+        _setYieldsSlotFrozen(C.SLOT_30Y, freezeSlot4);
     }
 
     function _freezeNonAvailableReservesSlots() private {
         ( bool freezeSlot1Reserves, bool freezeSlot2Reserves, bool freezeSlot3Reserves, bool freezeSlot4Reserves) = _updateLastValidReserves();
-        _setSlotFrozen(C.SLOT_2Y,  freezeSlot1Reserves);
-        _setSlotFrozen(C.SLOT_5Y,  freezeSlot2Reserves);
-        _setSlotFrozen(C.SLOT_10Y, freezeSlot3Reserves);
-        _setSlotFrozen(C.SLOT_30Y, freezeSlot4Reserves);
+        _setReservesSlotFrozen(C.SLOT_2Y,  freezeSlot1Reserves);
+        _setReservesSlotFrozen(C.SLOT_5Y,  freezeSlot2Reserves);
+        _setReservesSlotFrozen(C.SLOT_10Y, freezeSlot3Reserves);
+        _setReservesSlotFrozen(C.SLOT_30Y, freezeSlot4Reserves);
     }
 
 ////////////////////////////////////////////////////////////////////
