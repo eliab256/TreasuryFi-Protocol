@@ -83,8 +83,8 @@ abstract contract ERC3643 is AccessControl {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(OWNER_ROLE, msg.sender);
 
-        setIdentityRegistry(_identityRegistry);
-        setCompliance(_compliance);
+        _setIdentityRegistry(_identityRegistry);
+        _setCompliance(_compliance);
     }
 
     function _setIdentityRegistry(
@@ -183,20 +183,6 @@ abstract contract ERC3643 is AccessControl {
         _whenPaused();
         s_tokenPaused = false;
         emit Unpaused(msg.sender);
-    }
-
-
-    
-    /**
-     * @notice Public wrapper necessary for try/catch functionality.
-     * @dev Solidity requires that calls in try/catch blocks are external. We use `this.` to make an external call to the contract itself.
-     * The function is marked `onlyRole` to prevent arbitrary calls from outside.
-     */
-    function _executeRecoveryTransferExternal(
-        address lostWallet,
-        address newWallet
-    ) external onlyRole(OWNER_ROLE) {
-        _executeRecoveryTransfer(lostWallet, newWallet);
     }
 
 

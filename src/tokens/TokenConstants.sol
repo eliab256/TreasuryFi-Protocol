@@ -7,7 +7,15 @@ library TokenConstants {
     uint256 internal constant SLOT_10Y = 3;
     uint256 internal constant SLOT_30Y = 4;
 
+    uint256 internal constant PENALTY_PERIOD_2Y = 30 days;
+    uint256 internal constant PENALTY_PERIOD_5Y = 60 days;
+    uint256 internal constant PENALTY_PERIOD_10Y = 90 days;
+    uint256 internal constant PENALTY_PERIOD_30Y = 180 days;
+
     uint256 internal constant PERCENTAGE_PRECISION = 10000;
+    uint256 internal constant MAX_PERCENTAGE = 100 * PERCENTAGE_PRECISION; // 100% in percentage precision
+
+
 
     /**
      * @dev The maximum delay for USDC price feed updates, in seconds.

@@ -36,7 +36,7 @@ abstract contract UsdcUsdConverter {
         * @param usdcAmount The amount of USDC to convert (6 decimals).
         * @return usdAmount The equivalent USD value (18 decimals).
     */
-    function _convertUsdcToUsd(uint256 usdcAmount) internal view returns (uint256 usdAmount) {
+    function _convertUsdcToUsd18(uint256 usdcAmount) internal view returns (uint256 usdAmount) {
         uint256 usdcPrice = _getLatestUsdcPrice();
 
         uint256 usdcDecimals = i_usdcDecimals; // 6 for USDC
@@ -66,7 +66,7 @@ abstract contract UsdcUsdConverter {
     * @param usdAmount The USD amount to convert (18 decimals).
     * @return usdcAmount The equivalent USDC amount (6 decimals).
     */
-    function _convertUsdToUsdc(uint256 usdAmount) internal view returns (uint256 usdcAmount) {
+    function _convertUsd18ToUsdc(uint256 usdAmount) internal view returns (uint256 usdcAmount) {
         uint256 usdcPrice = _getLatestUsdcPrice();
 
         uint256 usdcDecimals = i_usdcDecimals; // 6 for USDC
@@ -86,6 +86,64 @@ abstract contract UsdcUsdConverter {
         );
     }
 
+
+    /**
+     * @notice Converts a USD amount from 18 decimals (standard) to 8 decimals (price feed format).
+     * @dev Pure decimal rescaling, no price feed involved.
+     * Formula: usd8Amount = usd18Amount * priceFeedDecimals / usdDecimals
+     * @param usd18Amount The USD amount (18 decimals).
+     * @return usd8Amount The USD amount (8 decimals).
+     */
+    function _convertUsd18ToUsd8(uint256 usd18Amount) internal view returns (uint256 usd8Amount) {
+        uint256 usdDecimals = i_decimalsStandard;
+        uint256 priceFeedDecimals = i_usdcPriceFeedDecimals;
+
+        usd8Amount = Math.mulDiv(usd18Amount, priceFeedDecimals, usdDecimals);
+    }
+
+    /**
+     * @notice Converts a USD amount from 8 decimals (price feed format) to 18 decimals (standard).
+     * @dev Pure decimal rescaling, no price feed involved.
+     * Formula: usd18Amount = usd8Amount * usdDecimals / priceFeedDecimals
+     * @param usd8Amount The USD amount (8 decimals).
+     * @return usd18Amount The USD amount (18 decimals).
+     */
+    function _convertUsd8ToUsd18(uint256 usd8Amount) internal view returns (uint256 usd18Amount) {
+        uint256 usdDecimals = i_decimalsStandard;
+        uint256 priceFeedDecimals = i_usdcPriceFeedDecimals;
+
+        usd18Amount = Math.mulDiv(usd8Amount, usdDecimals, priceFeedDecimals);
+    }
+
+    /**
+     * @notice Converts a USDC amount into its USD value (8 decimals / price feed format).
+     * @dev Input USDC amount must use 6 decimals.
+     *      Output USD amount uses 8 decimals (price feed format).
+     * Formula: usd8Amount = usdcAmount * price / usdcDecimals
+     * @param usdcAmount The amount of USDC to convert (6 decimals).
+     * @return usd8Amount The equivalent USD value (8 decimals).
+     */
+    function _convertUsdcToUsd8(uint256 usdcAmount) internal view returns (uint256 usd8Amount) {
+        uint256 usdcPrice = _getLatestUsdcPrice();
+        uint256 usdcDecimals = i_usdcDecimals;
+
+        usd8Amount = Math.mulDiv(usdcAmount, usdcPrice, usdcDecimals);
+    }
+
+    /**
+     * @notice Converts a USD amount (8 decimals / price feed format) into its USDC equivalent.
+     * @dev Input USD amount must use 8 decimals.
+     *      Output USDC amount uses 6 decimals.
+     * Formula: usdcAmount = usd8Amount * usdcDecimals / price
+     * @param usd8Amount The USD amount to convert (8 decimals).
+     * @return usdcAmount The equivalent USDC amount (6 decimals).
+     */
+    function _convertUsd8ToUsdc(uint256 usd8Amount) internal view returns (uint256 usdcAmount) {
+        uint256 usdcPrice = _getLatestUsdcPrice();
+        uint256 usdcDecimals = i_usdcDecimals;
+
+        usdcAmount = Math.mulDiv(usd8Amount, usdcDecimals, usdcPrice);
+    }
 
     function _getLatestUsdcPrice() internal view returns (uint256) {
         (

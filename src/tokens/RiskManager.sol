@@ -163,20 +163,20 @@ abstract contract RiskManager {
         _setSlotFrozen(_slot, _frozen);
     }
 
-    function _freezeNonAvailableYieldsSlots() private {
-        (bool freezeSlot1, bool freezeSlot2, bool freezeSlot3, bool freezeSlot4) = _updateLastValidYields();
-        _setYieldsSlotFrozen(C.SLOT_2Y,  freezeSlot1);
-        _setYieldsSlotFrozen(C.SLOT_5Y,  freezeSlot2);
-        _setYieldsSlotFrozen(C.SLOT_10Y, freezeSlot3);
-        _setYieldsSlotFrozen(C.SLOT_30Y, freezeSlot4);
+    function _updateYieldsValues() internal {
+        (bool freeze1, bool freeze2, bool freeze3, bool freeze4) = _updateLastValidYields();
+        _setYieldsSlotFrozen(C.SLOT_2Y,  freeze1);
+        _setYieldsSlotFrozen(C.SLOT_5Y,  freeze2);
+        _setYieldsSlotFrozen(C.SLOT_10Y, freeze3);
+        _setYieldsSlotFrozen(C.SLOT_30Y, freeze4);
     }
 
-    function _freezeNonAvailableReservesSlots() private {
-        ( bool freezeSlot1Reserves, bool freezeSlot2Reserves, bool freezeSlot3Reserves, bool freezeSlot4Reserves) = _updateLastValidReserves();
-        _setReservesSlotFrozen(C.SLOT_2Y,  freezeSlot1Reserves);
-        _setReservesSlotFrozen(C.SLOT_5Y,  freezeSlot2Reserves);
-        _setReservesSlotFrozen(C.SLOT_10Y, freezeSlot3Reserves);
-        _setReservesSlotFrozen(C.SLOT_30Y, freezeSlot4Reserves);
+    function _updateReservesValues() internal {
+        ( bool freeze1, bool freeze2, bool freeze3, bool freeze4) = _updateLastValidReserves();
+        _setReservesSlotFrozen(C.SLOT_2Y,  freeze1);
+        _setReservesSlotFrozen(C.SLOT_5Y,  freeze2);
+        _setReservesSlotFrozen(C.SLOT_10Y, freeze3);
+        _setReservesSlotFrozen(C.SLOT_30Y, freeze4);
     }
 
 ////////////////////////////////////////////////////////////////////
@@ -350,7 +350,8 @@ abstract contract RiskManager {
 ////////////////////////////////////////////////////////////////////  
 
     function _beforeOpenNewPosition(uint256 _slot, uint256 _value) internal {
-        // 1. Check for stale oracles data
+
+        // 1. Check if oracle data is not stale, to avoid using outdated data
         if (i_yieldsOracle.isStale()) revert RiskManager__StaleOracleData();
         if (i_reservesOracle.isStale()) revert RiskManager__StaleOracleData();
 
@@ -358,14 +359,19 @@ abstract contract RiskManager {
         if (s_slotFrozen[_slot]) revert RiskManager__SlotFrozen(_slot);
 
         // 3. Retreive the current data from oracles
-        BondYieldsResponse memory yields = i_yieldsOracle.getAllYields();
-        ReservesResponse memory reserves = i_reservesOracle.getAllReserves();
+        BondYieldsResponse memory yields = s_lastValidYields;
+        ReservesResponse memory reserves = s_lastValidReserves;
 
         // 4. Check if reserves are sufficient for the new position, considering the new liabilities
+
+        // 5. Update storage
+        // 5.1 Update total liabilities for the slot
+        s_totalLiabilitiesPerSlot[_slot] += _value;
     }
 
     function _beforeRedeeming(uint256 _slot, uint256 _value) internal {
-        // 1. Check for stale oracles data
+
+        // 1. Check if oracle data is not stale, to avoid using outdated data
         if (i_yieldsOracle.isStale()) revert RiskManager__StaleOracleData();
         if (i_reservesOracle.isStale()) revert RiskManager__StaleOracleData();
 
@@ -373,24 +379,32 @@ abstract contract RiskManager {
         if (s_slotFrozen[_slot]) revert RiskManager__SlotFrozen(_slot);
 
         // 3. Retreive the current data from oracles
-        BondYieldsResponse memory yields = i_yieldsOracle.getAllYields();
-        ReservesResponse memory reserves = i_reservesOracle.getAllReserves();
+        BondYieldsResponse memory yields = s_lastValidYields;
+        ReservesResponse memory reserves = s_lastValidReserves;
 
         // 4. Check if liquidity is sufficient for the redemption, considering the new liabilities
+
+        // 5. Update storage
+        // 5.1 Update total liabilities for the slot
+        s_totalLiabilitiesPerSlot[_slot] -= _value;
     }
 
     // claimibg yield trigger before mint, attenzione
     function _beforeClaimingYield(uint256 _slot, uint256 _value) internal {
-        // 1. Check for stale oracles data
+
+        // 1. Check if oracle data is not stale, to avoid using outdated data
         if (i_yieldsOracle.isStale()) revert RiskManager__StaleOracleData();
         if (i_reservesOracle.isStale()) revert RiskManager__StaleOracleData();
-
         // 2. Check if slot is frozen due to detected shock or oracle malfunction
         if (s_slotFrozen[_slot]) revert RiskManager__SlotFrozen(_slot);
 
         // 3. Retreive the current data from oracles
-        BondYieldsResponse memory yields = i_yieldsOracle.getAllYields();
-        ReservesResponse memory reserves = i_reservesOracle.getAllReserves();
+        BondYieldsResponse memory yields = s_lastValidYields;
+        ReservesResponse memory reserves = s_lastValidReserves;
+
+        // 5. Update storage
+        // 5.1 Update total liabilities for the slot
+        s_totalLiabilitiesPerSlot[_slot] += _value;
 
     }
 

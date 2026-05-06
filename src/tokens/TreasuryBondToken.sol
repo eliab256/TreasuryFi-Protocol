@@ -4,6 +4,7 @@ pragma solidity ^0.8.0;
 import {ERC3525} from "./ERC3525.sol";
 import {ERC3643} from "./ERC3643.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {YieldsMath} from "../library/YieldsMath.sol";
 import {RiskManager} from "./RiskManager.sol";
 import {UsdcUsdConverter} from "./UsdcUsdConverter.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -59,9 +60,10 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
     error TreasuryBondToken__AmountExceedsAvailableBalance();
     error TreasuryBondToken__AmountShouldBeLessOrEqualToFrozen();
     
-    uint256 internal constant MAX_PERCENTAGE = 100 * C.PERCENTAGE_PRECISION; // 100% in percentage precision
-    uint256 internal constant PERCENTAGE_YIELD_FEE = 10 * C.PERCENTAGE_PRECISION; // 10% fee on yield
-    uint256 internal constant PERCENTAGE_ENTRY_FEE = 1 * C.PERCENTAGE_PRECISION; // 1% fee on entry
+    
+    uint256 internal constant PERCENTAGE_YIELD_FEE = 20 * C.PERCENTAGE_PRECISION; // 20% fee on yield
+    uint256 internal constant PERCENTAGE_ENTRY_FEE = 2 * C.PERCENTAGE_PRECISION / 10; // 0,2% fee on entry
+    uint256 internal constant PERCENTAGE_EXIT_FEE_MAX = 5 * C.PERCENTAGE_PRECISION ; // 5% fee on exit
 
     
     uint256 private immutable i_minimumDepositAmount; // 10 USDC
@@ -146,87 +148,6 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
          return ERC3525.supportsInterface(interfaceId) || AccessControl.supportsInterface(interfaceId);
     }
 
-////////////////////////////////////////////////////////////////////
-/////////////////////// ERC3643 inheritance //////////////////////// 
-////////////////////////////////////////////////////////////////////  
-     
-    function setIdentityRegistry(address _identityRegistry) public onlyRole(OWNER_ROLE) {
-        _setIdentityRegistry(_identityRegistry);
-    }
-
-    function setOnchainID(address _onchainID) public onlyRole(OWNER_ROLE) {
-        _setOnchainID(_onchainID);
-    }
-
-    function setCompliance(address _compliance) public onlyRole(OWNER_ROLE) {
-        _setCompliance(_compliance);
-    }
-
-    function _executeRecoveryTransfer(
-        address lostWallet,
-        address newWallet
-    ) internal override {
-        // balanceOf(address) returns the number of ERC721 tokens owned by the address, so if it's 0 it means there are no tokens to recover
-        uint256 tokenCount = balanceOf(lostWallet);
-
-        // id snaphot BEFORE transfer to avoid issues with token enumeration after transfer
-        uint256[] memory tokenIds = new uint256[](tokenCount);
-        for (uint256 i = 0; i < tokenCount; i++) {
-            tokenIds[i] = tokenOfOwnerByIndex(lostWallet, i);
-        }
-
-        for (uint256 i = 0; i < tokenIds.length; i++) {
-            uint256 tokenId = tokenIds[i];
-
-            // Frozen values are mapped by tokenId, they follow the token automatically,
-            // no need to migrate them (the mapping s_frozenValues[tokenId] remains unchanged).
-
-            // _transferTokenId is internal in ERC3525 and bypasses the onlyApprovedOrOwner check
-            _transferTokenId(lostWallet, newWallet, tokenId);
-        }
-    }
-
-    function pause () public onlyRole(OWNER_ROLE) {
-        _pause();
-    }
-
-    function unpause () public onlyRole(OWNER_ROLE) {
-        _unpause();
-    }
-
-    function setAddressFrozen(address _userAddress, bool _freeze) external onlyRole(OWNER_ROLE) {
-        _setAddressFrozen(_userAddress, _freeze);
-    }
-
-
-    function freezePartialTokens(uint256 _tokenId, uint256 _amount) external onlyRole(OWNER_ROLE) {
-        _freezePartialToken(_tokenId, _amount);
-    }
-
-    function unfreezePartialTokens(uint256 _tokenId, uint256 _amount) external onlyRole(OWNER_ROLE) {
-        _unfreezePartialToken(_tokenId, _amount);
-    }
-
-    function batchSetAddressFrozen(address[] calldata _userAddresses, bool[] calldata _freeze) external onlyRole(OWNER_ROLE) {
-        for (uint256 i = 0; i < _userAddresses.length; i++) {
-            _setAddressFrozen(_userAddresses[i], _freeze[i]);
-        }
-    }
-
-
-    function batchFreezePartialTokens(uint256[] calldata _tokenId, uint256[] calldata _amounts) external onlyRole(OWNER_ROLE) {
-        for (uint256 i = 0; i < _tokenId.length; i++) {
-            _freezePartialToken(_tokenId[i], _amounts[i]);
-        }
-    }
-
-
-    function batchUnfreezePartialTokens(uint256[] calldata _tokenId, uint256[] calldata _amounts) external onlyRole(OWNER_ROLE) {
-        for (uint256 i = 0; i < _tokenId.length; i++) {
-            _unfreezePartialToken(_tokenId[i], _amounts[i]);
-        }
-    }
-
 
 ////////////////////////////////////////////////////////////////////
 ///////////////////// RiskManager inheritance ////////////////////// 
@@ -283,8 +204,11 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
         // 3. _beforeValueTransfer hook to update internal accounting
         // update total value for the slot
         // 4. _mint the ERC-3525 token to the user with the specified slot
-        // 5. Update positionData struct
-        // 6. _afterValueTransfer hook to update internal accounting
+        // 5. update storage
+        // 5.1 update fee collected (decidere se farlo in questo contratto o in treasury)
+            s_totalFeesCollected += feeCollected;
+        // 5.2. Update positionData struct
+        // 6. _afterValueTransfer hook to update internal accounting ??
     }
 
     function closePosition(uint256 _tokenId) public {
@@ -294,8 +218,10 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
         // @audit-issue implement closePosition function
         // 1. ERC-3463 checks
         // 2. _beforeValueTransfer hook to update internal accounting
+
         // 3. dal value del token calcolo il controvalore in USDC e poi calcolo le fee di uscita
         //(uint256 netAmount, uint256 feeCollected) = _collectExitFees(value, maturityTime);
+        _closePositionValue(_tokenId, balanceOf(_tokenId));
         // 3. TransferFrom this contract to caller the USDC value of the burned token
         // update total value for the slot
         // 4. Burn the specified ERC-3525 token
@@ -314,11 +240,23 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
         // 2. _beforeValueTransfer hook to update internal accounting
         // 3. dal value del token calcolo il controvalore in USDC e poi calcolo le fee di uscita
         //(uint256 netAmount, uint256 feeCollected) = _collectExitFees(value, maturityTime);
+        _closePositionValue(_tokenId, _valueToBurn);
         // 3. TransferFrom this contract to caller the USDC value of the burned portion of the token
         // 4. Burn the specified value from the ERC-3525 token
         // update total value for the slot
-        _burnValue(_tokenId, _valueToBurn);
+        //_burnValue(_tokenId, _valueToBurn);
         // 5. _afterValueTransfer hook to update internal accounting
+    }
+
+    function _closePositionValue(
+        uint256 _tokenId,
+        uint256 _valueToBurn
+    ) internal {
+        // 1. Burn the specified value from the ERC-3525 token
+        // 2. Send USDC amount to the user 
+        //_calculateEarlyRedeemFee(_mintTimestamp, _valueToBurn, _slot);
+        // 3. Update storage
+
     }
 
     function forceTransfer() onlyRole(OWNER_ROLE) public {
@@ -491,22 +429,67 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
     function _calculateEntryFees(
         uint256 _amount
     ) internal returns (uint256 netAmount, uint256 feeCollected) {
-        feeCollected = (_amount * PERCENTAGE_ENTRY_FEE) / C.PERCENTAGE_PRECISION;
+        feeCollected = (_amount * PERCENTAGE_ENTRY_FEE) / C.MAX_PERCENTAGE;
         netAmount = _amount - feeCollected;
     }
 
-    function _calculateExitFees(
-        uint256 _amount,
-        uint256 _maturityTime
-    ) internal returns (uint256 netAmount, uint256 feeCollected) {
-        // @audit-issue implement exit fee calculation
-        // se il token è maturo non applicare fee
-        // altrimenti applica anche una fee di uscita anticipata ponderata sulla diff tra scadenza e timestamp (es. 2%)
+    /**
+    * @notice Calculates the early redemption fee for a token.
+    * @dev The fee decreases linearly over time until it reaches zero
+    *      at the end of the penalty period.
+    * @param _mintTimestamp The timestamp when the token was minted
+    * @param _value The amount being redeemed
+    * @param _slot The slot associated with the token
+    *
+    * @return feeAmount The fee amount to pay
+    */
+    function _calculateEarlyRedeemFee(
+        uint256 _mintTimestamp,
+        uint256 _value,
+        uint256 _slot
+    ) internal view returns (uint256 feeAmount) {
+        uint256 penaltyPeriod = _getPenaltyPeriod(_slot); 
+        uint256 elapsedTime = block.timestamp - _mintTimestamp;
+
+        // No fee after penalty period expires
+        if (elapsedTime >= penaltyPeriod) {
+            return 0;
+        }
+
+        uint256 remainingTime = penaltyPeriod - elapsedTime;
+
+        // Linear fee decay
+        uint256 currentFeePercentage =
+            (PERCENTAGE_EXIT_FEE_MAX * remainingTime) / penaltyPeriod;
+
+        feeAmount =
+            (_value * currentFeePercentage) /
+            C.MAX_PERCENTAGE;
+
+        return feeAmount;
     }
 
-    function _calculateYieldFees(uint256 _yieldAmount) internal returns (uint256 netYield, uint256 feeCollected) {
-        // feeCollected = (_yieldAmount * PERCENTAGE_YIELD_FEE) / C.PERCENTAGE_PRECISION;
-        // netYield = _yieldAmount - feeCollected;
+    /**
+    * @notice Returns the penalty period associated with a slot
+    */
+    function _getPenaltyPeriod(uint256 _slot) internal pure returns (uint256) {
+        if (_slot == C.SLOT_2Y) {
+            return C.PENALTY_PERIOD_2Y;
+        }
+
+        if (_slot == C.SLOT_5Y) {
+            return C.PENALTY_PERIOD_5Y;
+        }
+
+        if (_slot == C.SLOT_10Y) {
+            return C.PENALTY_PERIOD_10Y;
+        }
+
+        if (_slot == C.SLOT_30Y) {
+            return C.PENALTY_PERIOD_30Y;
+        }
+
+        revert TreasuryBondToken__InvalidSlot();
     }
     
 
@@ -527,6 +510,10 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
         }
     }
 
+    /**
+     * @notice Internal function to prevent acceptance of Ether.
+     * @dev Reverts if any Ether is sent to the contract. This is important to prevent accidental loss of funds, as the contract is designed to work with USDC and not Ether.
+     */
     function _notAcceptEther() internal view {
         if (msg.value > 0) {
             revert TreasuryBondToken__EtherNotAccepted();
@@ -595,5 +582,97 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
     function valueDecimals() public view override(ERC3643, ERC3525) returns (uint8) {
         return super.valueDecimals();
     }
+
+////////////////////////////////////////////////////////////////////
+/////////////////////// ERC3643 inheritance //////////////////////// 
+////////////////////////////////////////////////////////////////////  
+     
+    function setIdentityRegistry(address _identityRegistry) public onlyRole(OWNER_ROLE) {
+        _setIdentityRegistry(_identityRegistry);
+    }
+
+    function setOnchainID(address _onchainID) public onlyRole(OWNER_ROLE) {
+        _setOnchainID(_onchainID);
+    }
+
+    function setCompliance(address _compliance) public onlyRole(OWNER_ROLE) {
+        _setCompliance(_compliance);
+    }
+
+    /**
+     * @notice Public wrapper necessary for try/catch functionality.
+     * @dev Solidity requires that calls in try/catch blocks are external. We use `this.` to make an external call to the contract itself.
+     * The function is marked `onlyRole` to prevent arbitrary calls from outside.
+     */
+    function _executeRecoveryTransferExternal(address lostWallet, address newWallet) external onlyRole(OWNER_ROLE) {
+        _executeRecoveryTransfer(lostWallet, newWallet);
+    }
+
+    function _executeRecoveryTransfer(
+        address lostWallet,
+        address newWallet
+    ) internal override {
+        // balanceOf(address) returns the number of ERC721 tokens owned by the address, so if it's 0 it means there are no tokens to recover
+        uint256 tokenCount = balanceOf(lostWallet);
+
+        // id snaphot BEFORE transfer to avoid issues with token enumeration after transfer
+        uint256[] memory tokenIds = new uint256[](tokenCount);
+        for (uint256 i = 0; i < tokenCount; i++) {
+            tokenIds[i] = tokenOfOwnerByIndex(lostWallet, i);
+        }
+
+        for (uint256 i = 0; i < tokenIds.length; i++) {
+            uint256 tokenId = tokenIds[i];
+
+            // Frozen values are mapped by tokenId, they follow the token automatically,
+            // no need to migrate them (the mapping s_frozenValues[tokenId] remains unchanged).
+
+            // _transferTokenId is internal in ERC3525 and bypasses the onlyApprovedOrOwner check
+            _transferTokenId(lostWallet, newWallet, tokenId);
+        }
+    }
+
+    function pause () public onlyRole(OWNER_ROLE) {
+        _pause();
+    }
+
+    function unpause () public onlyRole(OWNER_ROLE) {
+        _unpause();
+    }
+
+    function setAddressFrozen(address _userAddress, bool _freeze) external onlyRole(OWNER_ROLE) {
+        _setAddressFrozen(_userAddress, _freeze);
+    }
+
+
+    function freezePartialTokens(uint256 _tokenId, uint256 _amount) external onlyRole(OWNER_ROLE) {
+        _freezePartialToken(_tokenId, _amount);
+    }
+
+    function unfreezePartialTokens(uint256 _tokenId, uint256 _amount) external onlyRole(OWNER_ROLE) {
+        _unfreezePartialToken(_tokenId, _amount);
+    }
+
+    function batchSetAddressFrozen(address[] calldata _userAddresses, bool[] calldata _freeze) external onlyRole(OWNER_ROLE) {
+        for (uint256 i = 0; i < _userAddresses.length; i++) {
+            _setAddressFrozen(_userAddresses[i], _freeze[i]);
+        }
+    }
+
+
+    function batchFreezePartialTokens(uint256[] calldata _tokenId, uint256[] calldata _amounts) external onlyRole(OWNER_ROLE) {
+        for (uint256 i = 0; i < _tokenId.length; i++) {
+            _freezePartialToken(_tokenId[i], _amounts[i]);
+        }
+    }
+
+
+    function batchUnfreezePartialTokens(uint256[] calldata _tokenId, uint256[] calldata _amounts) external onlyRole(OWNER_ROLE) {
+        for (uint256 i = 0; i < _tokenId.length; i++) {
+            _unfreezePartialToken(_tokenId[i], _amounts[i]);
+        }
+    }
+
+
 
 }
