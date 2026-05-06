@@ -4,6 +4,7 @@ pragma solidity ^0.8.0;
 import {ERC3525} from "./ERC3525.sol";
 import {ERC3643} from "./ERC3643.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import {YieldsMath} from "../library/YieldsMath.sol";
 import {RiskManager} from "./RiskManager.sol";
 import {UsdcUsdConverter} from "./UsdcUsdConverter.sol";
@@ -22,6 +23,8 @@ import {PositionData, TreasuryBondTokenConstructorParams} from "../types.sol";
 import {TokenConstants as C} from "./TokenConstants.sol";
 import {IBondAutomation} from "../interfaces/IBondAutomation.sol";
 import {IReservesAutomation} from "../interfaces/IReservesAutomation.sol";
+import {ITreasury} from "../interfaces/ITreasury.sol";
+
 
 
 /**
@@ -31,7 +34,7 @@ import {IReservesAutomation} from "../interfaces/IReservesAutomation.sol";
  * Users can open new positions by depositing USDC and minting tokens, or close positions by burning tokens and withdrawing USDC.
  * The contract includes role-based access control for fee management and administrative functions.
  */
-contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
+contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, ReentrancyGuard{
 
     // Nuovi eventi
     event PositionOpened(address indexed user, uint256 indexed tokenId, uint256 slot, uint256 value, uint256 feeCollected);
@@ -67,12 +70,11 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
 
     
     uint256 private immutable i_minimumDepositAmount; // 10 USDC
+    ITreasury private immutable i_treasury;
 
     mapping(uint256 => PositionData) private s_fromIdToPositionData;
 
-    /// @dev total fees collected by the protocol, updated on entry, exit and yield claim
-    /// @dev is a 6 decimals value, since fees are collected in USDC
-    uint256 private s_totalFeesCollected; 
+
 
     bytes32 public constant FEES_MANAGER_ROLE = keccak256("FEES_MANAGER_ROLE");
     bytes32 public constant AUTOMATION_TRIGGERER_ROLE = keccak256("AUTOMATION_TRIGGERER_ROLE");
@@ -104,7 +106,8 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
             _params.reservesAutomation == address(0) ||
             _params.reservesOracle == address(0) ||
             _params.bondOracle == address(0) ||
-            _params.updateRiskManagerAutomation == address(0)
+            _params.updateRiskManagerAutomation == address(0) ||
+            _params.treasury == address(0)
         ) revert TreasuryBondToken__ZeroAddress();
 
         // ERC165 interface checks for oracles
@@ -138,6 +141,7 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
         _grantRole(AUTOMATION_TRIGGERER_ROLE, msg.sender);
         _grantRole(UPDATE_RISK_MANAGER_VALUES_ROLE, _params.updateRiskManagerAutomation);
         _grantRole(UPDATE_RISK_MANAGER_VALUES_ROLE, msg.sender);
+        i_treasury = ITreasury(_params.treasury);
         i_minimumDepositAmount = 10 * (10 ** i_usdcDecimals); // 10 USDC with decimals
 
     }
@@ -192,26 +196,26 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
         address _mintTo,
         uint256 _slot,
         uint256 _value
-    ) public onlyValidSlot(_slot) {
+    ) public onlyValidSlot(_slot) nonReentrant {
         // @audit-issue implement openNewPosition function
         if (_value < i_minimumDepositAmount) {
             revert TreasuryBondToken__InvalidValue();
         }
-        // 1. ERC-3463 checks
-        // 2. TransferFrom caller di usdc _value to this contract
-        // 3. Calculate entry fees and net amount to invest
+        // 1. Calculate entry fees and net amount to invest
         (uint256 netAmount, uint256 feeCollected) = _calculateEntryFees(_value);
-        // 3. _beforeValueTransfer hook to update internal accounting
-        // update total value for the slot
-        // 4. _mint the ERC-3525 token to the user with the specified slot
-        // 5. update storage
-        // 5.1 update fee collected (decidere se farlo in questo contratto o in treasury)
-            s_totalFeesCollected += feeCollected;
+        // 2. TransferFrom caller di usdc _value to treasury contract
+        i_treasury.depositUsdcFromOpenNewPosition(_value, msg.sender, _slot, netAmount, feeCollected);
+        // 3.  calculate the value to mint to the user 
+
+        // 4. call _mint to: checks ERC3643, checks RiskManager, checks ERc3525 accounting, 
+        //    update storage and mint the token to the user
+        _mint(_mintTo, _slot, netAmount);
+        
         // 5.2. Update positionData struct
-        // 6. _afterValueTransfer hook to update internal accounting ??
+        // 6. emit event newPositionOpened
     }
 
-    function closePosition(uint256 _tokenId) public {
+    function closePosition(uint256 _tokenId) public nonReentrant{
         if (!_isApprovedOrOwner(_msgSender(), _tokenId)) {
             revert TreasuryBondToken__NotApprovedOrOwner();
         }
@@ -231,7 +235,7 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
     function closePartialPosition(
         uint256 _tokenId,
         uint256 _valueToBurn
-    ) public {
+    ) public nonReentrant {
         if (!_isApprovedOrOwner(_msgSender(), _tokenId)) {
             revert TreasuryBondToken__NotApprovedOrOwner();
         }
@@ -313,7 +317,7 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
         //super.safeTransferFrom(_from, _to, _tokenId, "");
     }
 
-    function claimYield(uint256 _tokenId) public {
+    function claimYield(uint256 _tokenId) public nonReentrant {
         // @audit-issue implement claimYield function
         // verifica che msg.sender sia owner o approved del token
         // verifica che sia passato abbastanza tempo dall'ultimo claim (es. 30 gg)
@@ -327,17 +331,6 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
 ////////////////////////////////////////////////////////////////////
 /////////////////// Internal functions //////////////////// 
 ////////////////////////////////////////////////////////////////////  
-
-    function _mint(
-            address _mintTo,
-            uint256 _tokenId,
-            uint256 _slot,
-            uint256 _value
-        ) internal override {
-            // aggiornare l' accounting del tot value per slot prima di mintare
-            // @audit-info questo aggiornamento va fatto dentro _beforeValueTransfer o _afterValueTransfer? va valutato se è necessario distinguere tra mint, burn e transfer
-            super._mint(_mintTo, _tokenId, _slot, _value);
-    }
 
     function _claimYield(uint256 _tokenId) internal {
         // 1. Recupera lo slot, il valore del token e calcola gli interessi maturati in base al tempo trascorso
@@ -358,7 +351,7 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
         // 1. ERC3643 checks
         super._beforeValueTransfer(_from, _to, _fromTokenId, _toTokenId, _slot, _value);
 
-        // 2. Conditional logic based on whether it's a mint, burn, or transfer
+        // 2. Conditional logic based on whether it's a mint, burn, or transfer 
         if (_from == address(0)) {
             _beforeMint(_to, _toTokenId, _slot, _value);
         } else if (_to == address(0)) {
@@ -374,11 +367,11 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
         uint256 _slot,
         uint256 _value
     ) internal {
-       
+        // 1. Checks on RiskManager abd update riskManagerStorage if necessary
+        _riskManagerBeforeMint(_slot, _value);
 
+        // 2. @audit-issue aggiornare lo storage di treaduryBondToken prima di mintare
 
-        // 2. Checks Reserves oracle
-        // aggiornare l' accounting del tot value per slot prima di mintare
     }
 
     function _beforeBurn(
@@ -387,8 +380,9 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter{
         uint256 _slot,
         uint256 _value
     ) internal {
-
-        // aggiornare l' accounting del tot value per slot prima di burnare
+        // 1. Checks on RiskManager abd update riskManagerStorage if necessary
+        _riskManagerBeforeBurn(_slot, _value);
+        // 2. @audit-issue aggiornare lo storage di treaduryBondToken prima di burnare
     }
 
     function _beforeTransfer(

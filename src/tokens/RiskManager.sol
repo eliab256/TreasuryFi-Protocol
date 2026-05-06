@@ -349,7 +349,7 @@ abstract contract RiskManager {
 ///////////////////////// Lifecycle Hooks ////////////////////////// 
 ////////////////////////////////////////////////////////////////////  
 
-    function _beforeOpenNewPosition(uint256 _slot, uint256 _value) internal {
+    function _riskManagerBeforeMint(uint256 _slot, uint256 _value) internal {
 
         // 1. Check if oracle data is not stale, to avoid using outdated data
         if (i_yieldsOracle.isStale()) revert RiskManager__StaleOracleData();
@@ -369,7 +369,7 @@ abstract contract RiskManager {
         s_totalLiabilitiesPerSlot[_slot] += _value;
     }
 
-    function _beforeRedeeming(uint256 _slot, uint256 _value) internal {
+    function _riskManagerBeforeBurn(uint256 _slot, uint256 _value) internal {
 
         // 1. Check if oracle data is not stale, to avoid using outdated data
         if (i_yieldsOracle.isStale()) revert RiskManager__StaleOracleData();
@@ -389,8 +389,8 @@ abstract contract RiskManager {
         s_totalLiabilitiesPerSlot[_slot] -= _value;
     }
 
-    // claimibg yield trigger before mint, attenzione
-    function _beforeClaimingYield(uint256 _slot, uint256 _value) internal {
+    // claiming yield trigger before mint, attenzione
+    function _riskManagerBeforeClaimingYield(uint256 _slot, uint256 _value) internal {
 
         // 1. Check if oracle data is not stale, to avoid using outdated data
         if (i_yieldsOracle.isStale()) revert RiskManager__StaleOracleData();

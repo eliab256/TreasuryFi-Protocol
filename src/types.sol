@@ -27,15 +27,26 @@ struct ReservesResponse {
 }
 
 /**
-    * @notice Struct to store position-specific data for each tokenId
-    * - interestRate: The fixed interest rate for the position (scaled by 1e8)
-    * - positionMintTimestamp: The UNIX timestamp when the position was minted 
-    * - maturityTimestamp: The UNIX timestamp when the position matures
-*/ 
+ * @notice Stores position-specific data for each tokenId, captured at mint time.
+ *
+ * @param entryYield     The Treasury yield for this slot at mint time, in basis points (e.g. 450 = 4.50%).
+ *                       Used as y_entry in the NAV formula: NAV = par × [1 - D_mod × (y_current - y_entry)].
+ *                       Sourced from BondOracle at mint time.
+ *
+ * @param entryNAV       The NAV per unit at mint time, used to calculate how many units the user received
+ *                       for their USDC deposit: valueToMint = (usdcNet * PAR) / entryNAV.
+ *                       Stored to allow exact payout reconstruction and audit trail.
+ *
+ * @param mintTimestamp  The UNIX timestamp when the position was opened.
+ *                       Used to:
+ *                       - enforce the slot lock period (mint + lockPeriod > block.timestamp → early redeem fee)
+ *                       - calculate elapsed time for yield accrual in claimYield()
+ */
 struct PositionData {
-    uint256 interestRate;
-    uint256 positionMintTimestamp;
-    uint256 maturityTimestamp;
+    uint256 entryYield;      // basis points, e.g. 450 = 4.50%
+    uint256 entryNAV;        // NAV per unit at mint, same decimals as PAR_VALUE
+    uint256 mintTimestamp;   // block.timestamp at mint
+    uint256 lastClaimTimestamp; // block.timestamp of the last yield claim, used to calculate claimable yield since last claim
 }
 
 struct TreasuryBondTokenConstructorParams {
@@ -51,4 +62,5 @@ struct TreasuryBondTokenConstructorParams {
     address reservesOracle;
     address bondOracle;
     address feesCollector;
+    address treasury;
 }
