@@ -29,7 +29,7 @@ struct ReservesResponse {
 /**
  * @notice Stores position-specific data for each tokenId, captured at mint time.
  *
- * @param entryYield     The Treasury yield for this slot at mint time, in basis points (e.g. 450 = 4.50%).
+ * @param entryYield     The Treasury yield for this slot at mint time, in basis points x 100 (e.g. 45000 = 4.50%).
  *                       Used as y_entry in the NAV formula: NAV = par × [1 - D_mod × (y_current - y_entry)].
  *                       Sourced from BondOracle at mint time.
  *
@@ -43,7 +43,7 @@ struct ReservesResponse {
  *                       - calculate elapsed time for yield accrual in claimYield()
  */
 struct PositionData {
-    uint256 entryYield;      // basis points, e.g. 450 = 4.50%
+    uint256 entryYield;      // basis points x 100, e.g. 45000 = 4.50%
     uint256 entryNAV;        // NAV per unit at mint, same decimals as PAR_VALUE
     uint256 mintTimestamp;   // block.timestamp at mint
     uint256 lastClaimTimestamp; // block.timestamp of the last yield claim, used to calculate claimable yield since last claim
