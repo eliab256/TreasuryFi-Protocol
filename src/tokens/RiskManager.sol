@@ -344,6 +344,31 @@ abstract contract RiskManager {
         freezeSlot = false;
     }
 
+////////////////////////////////////////////////////////////////////
+/////////////////// Return oracle data confirmed /////////////////// 
+////////////////////////////////////////////////////////////////////  
+
+    function _getLastValidYields(uint256 _slot) internal view returns (BondYieldsResponse memory yields){
+        // 1. Check if oracle data is not stale, to avoid using outdated data
+        if (i_yieldsOracle.isStale()) revert RiskManager__StaleOracleData();
+
+        // 2. Check if slot is frozen due to detected shock or oracle malfunction
+        if (s_slotFrozen[_slot]) revert RiskManager__SlotFrozen(_slot);
+
+        // 3. Retreive the current data from oracles
+        yields = s_lastValidYields;
+    }
+
+    function _getLastValidReserves(uint256 _slot) internal view returns (ReservesResponse memory reserves){
+        // 1. Check if oracle data is not stale, to avoid using outdated data
+        if (i_reservesOracle.isStale()) revert RiskManager__StaleOracleData();
+
+        // 2. Check if slot is frozen due to detected shock or oracle malfunction
+        if (s_slotFrozen[_slot]) revert RiskManager__SlotFrozen(_slot);
+
+        // 3. Retreive the current data from oracles
+        reserves = s_lastValidReserves;
+    }
 
 ////////////////////////////////////////////////////////////////////
 ///////////////////////// Lifecycle Hooks ////////////////////////// 
@@ -351,6 +376,7 @@ abstract contract RiskManager {
 
     function _riskManagerBeforeMint(uint256 _slot, uint256 _value) internal {
 
+        // @audit-issue forse eliminare 1 2 e 3 perchè già presennti in _getLastValidYields e _getLastValidReserves, oppure chiamare questi ultimi per evitare di ripetere i check
         // 1. Check if oracle data is not stale, to avoid using outdated data
         if (i_yieldsOracle.isStale()) revert RiskManager__StaleOracleData();
         if (i_reservesOracle.isStale()) revert RiskManager__StaleOracleData();

@@ -39,17 +39,17 @@ contract Treasury is AccessControl, ITreasury {
     }
 
     function depositUsdcFromOpenNewPosition(
-        uint256 _amount, address _from, uint256 _slot, uint256 _netValue, uint256 _feeAmount
+        uint256 _amount, address _from, uint256 _slot, uint256 _feeAmount
         ) external onlyRole(DEPOSIT_ROLE){
         // 1. update accounting 
         s_totalFeesCollected += _feeAmount.toUint128();
         s_totalFeesToBeCollected += _feeAmount.toUint128();
-        s_totalUsdcPerSlot[_slot] += _netValue;
+        s_totalUsdcPerSlot[_slot] += _amount - _feeAmount;
         // 2. transfer USDC from the user to the treasury
         i_usdc.safeTransferFrom(_from, address(this), _amount);
 
         // 3. emit event usdcDepositedFromOpenNewPosition
-        emit usdcDepositedFromOpenNewPosition(_amount, _from, _slot, _netValue, _feeAmount);
+        emit usdcDepositedFromOpenNewPosition(_amount, _from, _slot, _feeAmount);
 
     }
 

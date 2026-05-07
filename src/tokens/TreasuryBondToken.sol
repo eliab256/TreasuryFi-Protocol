@@ -62,8 +62,9 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
     error TreasuryBondToken__WalletNotFrozen();
     error TreasuryBondToken__AmountExceedsAvailableBalance();
     error TreasuryBondToken__AmountShouldBeLessOrEqualToFrozen();
-    
-    
+
+    /// @dev constant unit value to calculate NAV.
+    uint256 internal constant PAR = 1e18; 
     uint256 internal constant PERCENTAGE_YIELD_FEE = 20 * C.PERCENTAGE_PRECISION; // 20% fee on yield
     uint256 internal constant PERCENTAGE_ENTRY_FEE = 2 * C.PERCENTAGE_PRECISION / 10; // 0,2% fee on entry
     uint256 internal constant PERCENTAGE_EXIT_FEE_MAX = 5 * C.PERCENTAGE_PRECISION ; // 5% fee on exit
@@ -197,65 +198,70 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
         uint256 _slot,
         uint256 _value
     ) public onlyValidSlot(_slot) nonReentrant {
-        // @audit-issue implement openNewPosition function
         if (_value < i_minimumDepositAmount) {
             revert TreasuryBondToken__InvalidValue();
         }
         // 1. Calculate entry fees and net amount to invest
         (uint256 netAmount, uint256 feeCollected) = _calculateEntryFees(_value);
         // 2. TransferFrom caller di usdc _value to treasury contract
-        i_treasury.depositUsdcFromOpenNewPosition(_value, msg.sender, _slot, netAmount, feeCollected);
-        // 3.  calculate the value to mint to the user 
+        i_treasury.depositUsdcFromOpenNewPosition(_value, msg.sender, _slot, feeCollected);
+        // 3.  convert net amount from usdc to usd with std decimals (18)
+        uint256 netAmountInUsd = _convertUsdcToUsd18(netAmount);
 
-        // 4. call _mint to: checks ERC3643, checks RiskManager, checks ERc3525 accounting, 
+        // 4. get current yield from slot
+        uint256 currentYield = s_lastValidYieldPerSlot[_slot];
+
+        // 5. call _mint to: checks ERC3643, checks RiskManager, checks ERc3525 accounting, 
         //    update storage and mint the token to the user
-        _mint(_mintTo, _slot, netAmount);
+        // @audit-issue assicurarsi che i check siano effettivi dentro _beforeTransfer
+        uint256 newTokenId = _mint(_mintTo, _slot, netAmountInUsd);
         
-        // 5.2. Update positionData struct
-        // 6. emit event newPositionOpened
+        // 6. Update positionData struct
+        s_fromIdToPositionData[newTokenId] = PositionData({
+            entryYield: currentYield, 
+            entryNAV: PAR,
+            mintTimestamp: block.timestamp,
+            lastClaimTimestamp: block.timestamp
+        });
+        // 7. emit event newPositionOpened
+        emit PositionOpened(_mintTo, newTokenId, _slot, netAmountInUsd, feeCollected);
     }
 
     function closePosition(uint256 _tokenId) public nonReentrant{
-        if (!_isApprovedOrOwner(_msgSender(), _tokenId)) {
-            revert TreasuryBondToken__NotApprovedOrOwner();
-        }
-        // @audit-issue implement closePosition function
-        // 1. ERC-3463 checks
-        // 2. _beforeValueTransfer hook to update internal accounting
-
-        // 3. dal value del token calcolo il controvalore in USDC e poi calcolo le fee di uscita
-        //(uint256 netAmount, uint256 feeCollected) = _collectExitFees(value, maturityTime);
         _closePositionValue(_tokenId, balanceOf(_tokenId));
-        // 3. TransferFrom this contract to caller the USDC value of the burned token
-        // update total value for the slot
-        // 4. Burn the specified ERC-3525 token
-        // 5. _afterValueTransfer hook to update internal accounting
     }
 
     function closePartialPosition(
         uint256 _tokenId,
         uint256 _valueToBurn
     ) public nonReentrant {
-        if (!_isApprovedOrOwner(_msgSender(), _tokenId)) {
-            revert TreasuryBondToken__NotApprovedOrOwner();
-        }
-        // @audit-issue implement closePartialPosition function
-        // 1. ERC-3463 checks
-        // 2. _beforeValueTransfer hook to update internal accounting
-        // 3. dal value del token calcolo il controvalore in USDC e poi calcolo le fee di uscita
-        //(uint256 netAmount, uint256 feeCollected) = _collectExitFees(value, maturityTime);
         _closePositionValue(_tokenId, _valueToBurn);
-        // 3. TransferFrom this contract to caller the USDC value of the burned portion of the token
-        // 4. Burn the specified value from the ERC-3525 token
-        // update total value for the slot
-        //_burnValue(_tokenId, _valueToBurn);
-        // 5. _afterValueTransfer hook to update internal accounting
+
+    }
+
+    function _calculateCurrentNAV(uint256 _tokenId, uint256 _entryYield) internal view returns (uint256 currentNAV) {
+        uint256 slot = slotOf(_tokenId);
+        uint256 currentYield = s_lastValidYieldPerSlot[slot];
+        uint256 D_mod = _getModifiedDurationForSlot(slot);
+        currentNAV = YieldsMath.calculateCurrentNAV(PAR, _entryYield, currentYield, D_mod);
     }
 
     function _closePositionValue(
         uint256 _tokenId,
         uint256 _valueToBurn
     ) internal {
+        // 1. Get the slot of the tokenId
+        //uint256 slot = slotOf(_tokenId);
+
+        // get position data
+        PositionData memory positionData = s_fromIdToPositionData[_tokenId];
+
+        // 2. Get current yield for the slot
+        //uint256 currentYield = s_lastValidYieldPerSlot[slot];
+
+        // 3. Calculate the current NAV based on the entry yield and current yield
+        uint256 currentNAV = _calculateCurrentNAV(_tokenId, positionData.entryYield);
+        uint256 usdPayoutBeforeFees = (_valueToBurn * currentNAV) / PAR;
         // 1. Burn the specified value from the ERC-3525 token
         // 2. Send USDC amount to the user 
         //_calculateEarlyRedeemFee(_mintTimestamp, _valueToBurn, _slot);
@@ -396,9 +402,6 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
 
         // se si vuole implementare la funzione di transfer forzato dal protocol owner, è necessario aggiornare l' accounting del tot value per slot anche durante i transfer
     }
-
-
-
 
     /**
      * @notice Hook that is called after any transfer of value. This includes minting and burning.
@@ -556,14 +559,12 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
         return s_fromIdToPositionData[_tokenId];
     }
 
-    /**
-     * @notice Returns the total fees collected by the protocol.
-     * @dev Fees are collected on yield and entry operations.
-     * @return The total amount of fees collected (in USDC).
-     */
-    function getTotalFeesCollected() external view returns (uint256) {
-        return s_totalFeesCollected;
-    }
+    function _getDmodForSlot(uint256 _slot) internal pure returns (uint256) {
+    if (_slot == C.SLOT_2Y)  return C.D_MOD_2Y;
+    if (_slot == C.SLOT_5Y)  return C.D_MOD_5Y;
+    if (_slot == C.SLOT_10Y) return C.D_MOD_10Y;
+    if (_slot == C.SLOT_30Y) return C.D_MOD_30Y;
+}
 
     function name() public view override returns (string memory) {
         return super.name();
@@ -598,7 +599,7 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
      * @dev Solidity requires that calls in try/catch blocks are external. We use `this.` to make an external call to the contract itself.
      * The function is marked `onlyRole` to prevent arbitrary calls from outside.
      */
-    function _executeRecoveryTransferExternal(address lostWallet, address newWallet) external onlyRole(OWNER_ROLE) {
+    function _executeRecoveryTransferExternal(address lostWallet, address newWallet) external override onlyRole(OWNER_ROLE) {
         _executeRecoveryTransfer(lostWallet, newWallet);
     }
 

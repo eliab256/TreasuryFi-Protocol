@@ -8,13 +8,13 @@ interface ITreasury {
     error Treasury__AmountExceedsUsdcInSlot();
 
     // ------ Events ------
-    event usdcDepositedFromOpenNewPosition(uint256 indexed amount, address indexed from, uint256 indexed slot, uint256 netValue, uint256 feeAmount);
+    event usdcDepositedFromOpenNewPosition(uint256 indexed amount, address indexed from, uint256 indexed slot, uint256 feeAmount);
     event usdcWithdrawnFromClosePosition(uint256 indexed amount, address indexed to, uint256 indexed slot);
     event LiquidityInjected(uint256 indexed amount, uint256 indexed slot);
     event FeesUsedToInjectLiquidity(uint256 indexed amount, uint256 indexed slot);
 
     // ------ Main functions ------
-    function depositUsdcFromOpenNewPosition(uint256 _amount, address _from, uint256 _slot, uint256 _netValue, uint256 _feeAmount) external; 
+    function depositUsdcFromOpenNewPosition(uint256 _amount, address _from, uint256 _slot, uint256 _feeAmount) external; 
     function withdrawUsdcFromClosePosition(uint256 _amount, address _to, uint256 _slot) external;
     function injectLiquidity(uint256 _amount, uint256 _slot) external;
     function useFeesCollectedToInjectLiquidity(uint256 _amount, uint256 _slot) external;

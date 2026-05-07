@@ -173,6 +173,13 @@ abstract contract ERC3643 is AccessControl {
         address newWallet
     ) internal virtual;
 
+    /// @dev Public wrapper required for try/catch in recoveryAddress.
+    /// Override in child contract with the actual implementation.
+    function _executeRecoveryTransferExternal(
+        address lostWallet,
+        address newWallet
+    ) external virtual;
+
     function _pause() internal {
         _whenNotPaused();
         s_tokenPaused = true;

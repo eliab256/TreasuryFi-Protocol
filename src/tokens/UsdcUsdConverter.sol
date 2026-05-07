@@ -39,20 +39,16 @@ abstract contract UsdcUsdConverter {
     function _convertUsdcToUsd18(uint256 usdcAmount) internal view returns (uint256 usdAmount) {
         uint256 usdcPrice = _getLatestUsdcPrice();
 
-        uint256 usdcDecimals = i_usdcDecimals; // 6 for USDC
-        uint256 usdDecimals = i_decimalsStandard; // 18 for USD
-        uint256 priceFeedDecimals = i_usdcPriceFeedDecimals; // 8 for price feed
-
         uint256 numerator = Math.mulDiv(
             usdcAmount,
             usdcPrice,
-            usdcDecimals
+            i_usdcDecimals
         );
 
         usdAmount = Math.mulDiv(
             numerator,
-            usdDecimals,
-            priceFeedDecimals
+            i_decimalsStandard,
+            i_usdcPriceFeedDecimals
         );
     }
 
@@ -125,9 +121,8 @@ abstract contract UsdcUsdConverter {
      */
     function _convertUsdcToUsd8(uint256 usdcAmount) internal view returns (uint256 usd8Amount) {
         uint256 usdcPrice = _getLatestUsdcPrice();
-        uint256 usdcDecimals = i_usdcDecimals;
 
-        usd8Amount = Math.mulDiv(usdcAmount, usdcPrice, usdcDecimals);
+        usd8Amount = Math.mulDiv(usdcAmount, usdcPrice, i_usdcDecimals);
     }
 
     /**

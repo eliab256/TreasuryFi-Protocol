@@ -7,6 +7,29 @@ library TokenConstants {
     uint256 internal constant SLOT_10Y = 3;
     uint256 internal constant SLOT_30Y = 4;
 
+    /**
+    * @notice Returns the modified duration used to estimate bond price sensitivity to changes in yield.
+    * @dev Modified duration measures how much a bond's price changes when its yield changes.
+    * Financial interpretation:
+    * - If yield increases by 1%, bond price decreases by approximately D_mod%
+    * - If yield decreases by 1%, bond price increases by approximately D_mod%
+    *
+    * Exact formula for fixed-rate bonds:
+    * D_mod = D_mac / (1 + y / n)
+    * Where:
+    * - D_mac = Macaulay Duration (weighted average maturity of cash flows)
+    * - y     = annual yield
+    * - n     = number of coupon payments per year
+    *
+    * Since this protocol groups bonds into fixed maturity buckets (2Y, 5Y, 10Y, 30Y), modified duration is approximated as 
+    * a constant value per slot rather than being recalculated for every individual bond.
+    * This approximation is used to estimate NAV changes caused by yield curve movements.
+    */
+    uint256 internal constant D_MOD_2Y = 1_9000;   // 1.9
+    uint256 internal constant D_MOD_5Y = 4_5000;   // 4.5
+    uint256 internal constant D_MOD_10Y = 8_5000;  // 8.5
+    uint256 internal constant D_MOD_30Y = 18_0000; // 18
+
     uint256 internal constant PENALTY_PERIOD_2Y = 30 days;
     uint256 internal constant PENALTY_PERIOD_5Y = 60 days;
     uint256 internal constant PENALTY_PERIOD_10Y = 90 days;
