@@ -225,7 +225,7 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
         });
         
         // 7. emit event newPositionOpened
-        emit PositionOpened(_mintTo, newTokenId, _slot, netAmountInUsd, feeCollected);
+        emit PositionOpened(_mintTo, newTokenId, _slot, netAmount, feeCollected);
     }
 
     function closePosition(uint256 _tokenId) public nonReentrant onlyApprovedOrOwner(_tokenId) {
@@ -244,37 +244,37 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
         //emit event
     }
 
-    function _calculateCurrentNAV(uint256 _tokenId, uint256 _entryYield, uint256 _slot) internal view returns (uint256 currentNAV) {
-        uint256 currentYield = s_lastValidYieldPerSlot[_slot];
+    function _calculateCurrentNAV(uint256 _tokenId, uint256 _entryYield, uint256 _currentYield, uint256 _slot) internal view returns (uint256 currentNAV) {
         uint256 D_mod = _getDmodForSlot(_slot);
-        currentNAV = YieldsMath.calculateCurrentNAV(PAR, _entryYield, currentYield, D_mod);
+        currentNAV = YieldsMath.calculateCurrentNAV(PAR, _entryYield, _currentYield, D_mod);
     }
 
     function _closePositionValue(
         uint256 _tokenId,
         uint256 _valueToBurn
     ) internal {
-        // 1. Get the slot of the tokenId
+        // 1. Get the slot of the tokenId and current yield for that slot
         uint256 slot = slotOf(_tokenId);
+        uint256 currentYield = s_lastValidYieldPerSlot[slot];
 
         // 2. get position data
-        PositionData memory positionData = s_fromIdToPositionData[_tokenId];
+        PositionData memory posData = s_fromIdToPositionData[_tokenId];
 
         // 3. accrue all pending interests until now (in USDC)
-        uint256 yieldToClaim = _claimYield(_tokenId);
+        uint256 yieldToClaim = _claimYield(_tokenId, slot, currentYield, posData);
         uint256 yieldToClaimInUsdc = _convertUsd18ToUsdc(yieldToClaim);
-
-        // 4. Calculate the current NAV based on the entry yield and current yield
-        uint256 currentNAV = _calculateCurrentNAV(_tokenId, positionData.entryYield, slot);
+    
+        // 4. Calculate the current NAV based on the entry yield and current yield  
+        uint256 currentNAV = _calculateCurrentNAV(_tokenId, posData.entryYield, currentYield, slot);
         uint256 usdPayoutBeforeFees = (_valueToBurn * currentNAV) / PAR;
         
-        // 5. Send USDC amount to the user 
-        uint256 earlyRedeemFee = _calculateEarlyRedeemFee(positionData.mintTimestamp, usdPayoutBeforeFees, slot);
+        // 5. Calculate early redeem fee if the position is closed before the penalty period for that slot
+        uint256 earlyRedeemFee = _calculateEarlyRedeemFee(posData.mintTimestamp, usdPayoutBeforeFees, slot);
 
+        // 6. Send USDC amount to the user 
         uint256 totalUsdcPayout = yieldToClaimInUsdc + usdPayoutBeforeFees ;
         i_treasury.withdrawUsdcFromClosePosition(totalUsdcPayout, ownerOf(_tokenId), slot, earlyRedeemFee);
 
-        
     }
 
     function forceTransfer() onlyRole(OWNER_ROLE) public {
@@ -334,24 +334,44 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
 
     function claimYield(uint256 _tokenId) public nonReentrant onlyApprovedOrOwner(_tokenId){
         // @audit-issue implement claimYield function
-        // verifica che sia passato abbastanza tempo dall'ultimo claim (es. 30 gg)
-        // chiama la funzione interna per calcolare e trasferire gli interessi maturati
-        // sottrarre la percentuale di yield trattenuta dal protocollo come fee
-        // update total fees collected
-        // aggiornare total value per slot
-        uint256 yieldToClaim = _claimYield(_tokenId);
+        // 1. get position data from tokenId
+        PositionData memory posData = s_fromIdToPositionData[_tokenId];
+
+        // 2. verify that the lock period for claiming yield has elapsed since the last claim or since minting if it's the first claim
+        if(posData.lastClaimTimestamp + C.LOCK_PERIOD_CLAIM_YIELD > block.timestamp){
+            revert TreasuryBondToken__LockPeriodNotElapsed();
+        }
+
+        // 3. get slot from tokenId and current yield for that slot
+        uint256 slot = _getSlot(_tokenId);
+        uint256 currentYield = s_lastValidYieldPerSlot[slot];
+
+        // 4. get total yield to claim in usd with 18 decimals, this function also updates the lastClaimTimestamp to now
+        (uint256 netPayout, uint256 managmentFee) = _claimYield(_tokenId, slot, currentYield, posData);
+
+        // 5. call treasury to transfer USDC to the user
+        // @audit-issue implement treasury transfer logic
     }
 
 ////////////////////////////////////////////////////////////////////
-/////////////////// Internal functions //////////////////// 
+//////////////////////// Internal functions //////////////////////// 
 ////////////////////////////////////////////////////////////////////  
 
                                                                 // che decimali sono?
-    function _claimYield(uint256 _tokenId) internal returns (uint256 yieldToClaim) {
-        // deve bypassare il periodo in cui non possono esseree calimati i interest, questo check avviene nella public
-        // 1. Recupera lo slot, il valore del token e calcola gli interessi maturati in base al tempo trascorso
-        // si può usare la func public che avrà un intervallo di tempo minimo tra due claim per evitare abusi
-        // questa funzione viene usata anche durante i transfer
+    function _claimYield(uint256 _tokenId, uint256 _slot, uint256 _currentYield, PositionData memory positionData) internal returns (uint256 netPayout, uint256 managmentFee) {
+
+        // questa funzione viene usata anche durante i transfer 
+        uint256 principalUsd = YieldsMath.calculatePrincipalUsd(balanceOf(_tokenId), positionData.entryNAV, PAR);
+        uint256 elapsedTime = block.timestamp - positionData.lastClaimTimestamp;
+        uint256 grossAccrued = principalUsd * positionData.entryYield * elapsedTime / (365 days * C.PERCENTAGE_PRECISION);
+
+        // retreive managment fee and net payout from gross accrued yield
+        managmentFee = grossAccrued * PERCENTAGE_YIELD_FEE / C.MAX_PERCENTAGE;
+        netPayout = grossAccrued - managmentFee;
+
+        // update last claim timestamp to now
+        s_fromIdToPositionData[_tokenId].lastClaimTimestamp = block.timestamp;
+        // chiamare trasury
         // emette l' evento di interesse maturato
     }
 

@@ -30,10 +30,13 @@ library TokenConstants {
     uint256 internal constant D_MOD_10Y = 8_5000;  // 8.5
     uint256 internal constant D_MOD_30Y = 18_0000; // 18
 
+    /// @dev Lock period during which early redemption fee applies, per slot
     uint256 internal constant PENALTY_PERIOD_2Y = 30 days;
     uint256 internal constant PENALTY_PERIOD_5Y = 60 days;
     uint256 internal constant PENALTY_PERIOD_10Y = 90 days;
     uint256 internal constant PENALTY_PERIOD_30Y = 180 days;
+
+    uint256 internal constant LOCK_PERIOD_CLAIM_YIELD = 30 days;
 
     uint256 internal constant PERCENTAGE_PRECISION = 10000;
     uint256 internal constant MAX_PERCENTAGE = 100 * PERCENTAGE_PRECISION; // 100% in percentage precision

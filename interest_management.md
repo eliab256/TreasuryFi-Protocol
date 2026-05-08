@@ -17,25 +17,7 @@ dove:
 
 ---
 
-## 2. Perché tasso fisso e non variabile
-
-In TradFi un T-Bill ha un coupon fisso determinato all'asta di emissione. L'Opzione A (tasso variabile, yield oracle al momento del claim) sarebbe più semplice da implementare ma non replica il comportamento reale dello strumento.
-
-Confronto:
-
-| | Opzione A (variabile) | Opzione B (fisso, questo protocollo) |
-|---|---|---|
-| Tasso usato | yield oracle al claim | yield al mint, bloccato |
-| Fedeltà al T-Bill | Bassa | Alta |
-| Complessità | Minore | Maggiore |
-| Prevedibilità per l'utente | Bassa | Alta |
-| Dipendenza da oracle at claim | Sì | No |
-
-Con l'Opzione B l'utente sa esattamente quanto guadagnerà nel tempo — il rendimento è deterministico dato `entryYield`, `principalUsdc` e `elapsed`.
-
----
-
-## 3. Equivalenza con il calcolo TradFi
+## 2. Equivalenza con il calcolo TradFi
 
 In TradFi:
 ```
@@ -54,7 +36,7 @@ Sono matematicamente identici. L'unica differenza è che in TradFi il face value
 
 ---
 
-## 4. Fee di gestione
+## 3. Fee di gestione
 
 Il protocollo trattiene una **management fee** sugli interessi lordi. La fee non viene detratta dal `entryYield` salvato in `PositionData` — viene calcolata al momento della distribuzione:
 
@@ -76,7 +58,7 @@ netPayout     = 221.92 - 1.10                         = 220.82 USDC
 
 ---
 
-## 5. lastClaimTimestamp — perché è necessario
+## 4. lastClaimTimestamp — perché è necessario
 
 Senza `lastClaimTimestamp`, ogni claim ricalcolerebbe gli interessi dall'apertura della posizione, pagando più volte lo stesso periodo. Il campo viene:
 
@@ -95,7 +77,7 @@ struct PositionData {
 
 ---
 
-## 6. Minimum claim interval
+## 5. Minimum claim interval
 
 Per evitare micro-claims frequenti che aumentano i costi di gas e complicano la contabilità del Treasury, il protocollo impone un intervallo minimo tra due claim consecutivi:
 
@@ -111,7 +93,7 @@ Questo intervallo è coerente con la natura mensile dei pagamenti cedolari in Tr
 
 ---
 
-## 7. Interazione con closePartialPosition
+## 6. Interazione con closePartialPosition
 
 Quando l'utente brucia parte del value, `balanceOf(tokenId)` si riduce. Questo riduce proporzionalmente il `principalUsdc` per i claim futuri:
 
@@ -141,7 +123,7 @@ function closePartialPosition(uint256 _tokenId, uint256 _valueToBurn) public {
 
 ---
 
-## 8. Interazione con il trasferimento parziale
+## 7. Interazione con il trasferimento parziale
 
 Quando `transferFrom(fromTokenId, to, value)` crea un nuovo token, il contratto deve:
 
@@ -162,7 +144,7 @@ token #99: value=400, entryYield=450 (ereditato), lastClaim=t1, mintTimestamp er
 
 ---
 
-## 9. Claim durante un trasferimento intero del token
+## 8. Claim durante un trasferimento intero del token
 
 Quando `transferFrom(from, to, tokenId)` trasferisce l'intero token ERC-721 style, il nuovo owner eredita tutto incluso `lastClaimTimestamp`. Il protocollo deve decidere se:
 
@@ -183,7 +165,7 @@ function _beforeTransfer(...) internal {
 
 ---
 
-## 10. Flusso USDC del Treasury per gli interessi
+## 9. Flusso USDC del Treasury per gli interessi
 
 ```
 claimYield(tokenId)
@@ -201,7 +183,7 @@ La priorità sulla liquidità del protocollo garantisce che i depositi degli ute
 
 ---
 
-## 11. Invariante di solvibilità per gli interessi
+## 10. Invariante di solvibilità per gli interessi
 
 In qualsiasi momento, il Treasury deve poter coprire tutti gli interessi maturati e non ancora claimati su tutti i token attivi. Questo è verificabile come:
 
