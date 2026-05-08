@@ -223,18 +223,19 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
             mintTimestamp: block.timestamp,
             lastClaimTimestamp: block.timestamp
         });
+        
         // 7. emit event newPositionOpened
         emit PositionOpened(_mintTo, newTokenId, _slot, netAmountInUsd, feeCollected);
     }
 
-    function closePosition(uint256 _tokenId) public nonReentrant{
+    function closePosition(uint256 _tokenId) public nonReentrant onlyApprovedOrOwner(_tokenId) {
         _closePositionValue(_tokenId, balanceOf(_tokenId));
     }
 
     function closePartialPosition(
         uint256 _tokenId,
         uint256 _valueToBurn
-    ) public nonReentrant {
+    ) public nonReentrant onlyApprovedOrOwner(_tokenId) {
         _closePositionValue(_tokenId, _valueToBurn);
 
     }
@@ -242,7 +243,7 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
     function _calculateCurrentNAV(uint256 _tokenId, uint256 _entryYield) internal view returns (uint256 currentNAV) {
         uint256 slot = slotOf(_tokenId);
         uint256 currentYield = s_lastValidYieldPerSlot[slot];
-        uint256 D_mod = _getModifiedDurationForSlot(slot);
+        uint256 D_mod = _getDmodForSlot(slot);
         currentNAV = YieldsMath.calculateCurrentNAV(PAR, _entryYield, currentYield, D_mod);
     }
 
@@ -250,14 +251,17 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
         uint256 _tokenId,
         uint256 _valueToBurn
     ) internal {
-        // 1. Get the slot of the tokenId
+        // Get the slot of the tokenId
         //uint256 slot = slotOf(_tokenId);
 
-        // get position data
+        // 1. get position data
         PositionData memory positionData = s_fromIdToPositionData[_tokenId];
 
-        // 2. Get current yield for the slot
+        // Get current yield for the slot
         //uint256 currentYield = s_lastValidYieldPerSlot[slot];
+
+        // 2. accrue all pending interests until now
+            _claimYield(_tokenId);
 
         // 3. Calculate the current NAV based on the entry yield and current yield
         uint256 currentNAV = _calculateCurrentNAV(_tokenId, positionData.entryYield);
@@ -323,9 +327,8 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
         //super.safeTransferFrom(_from, _to, _tokenId, "");
     }
 
-    function claimYield(uint256 _tokenId) public nonReentrant {
+    function claimYield(uint256 _tokenId) public nonReentrant onlyApprovedOrOwner(_tokenId){
         // @audit-issue implement claimYield function
-        // verifica che msg.sender sia owner o approved del token
         // verifica che sia passato abbastanza tempo dall'ultimo claim (es. 30 gg)
         // chiama la funzione interna per calcolare e trasferire gli interessi maturati
         // sottrarre la percentuale di yield trattenuta dal protocollo come fee
