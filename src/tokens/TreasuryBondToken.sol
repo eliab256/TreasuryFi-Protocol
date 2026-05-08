@@ -230,6 +230,8 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
 
     function closePosition(uint256 _tokenId) public nonReentrant onlyApprovedOrOwner(_tokenId) {
         _closePositionValue(_tokenId, balanceOf(_tokenId));
+        _burn(_tokenId);
+        // emit event position closed
     }
 
     function closePartialPosition(
@@ -237,13 +239,14 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
         uint256 _valueToBurn
     ) public nonReentrant onlyApprovedOrOwner(_tokenId) {
         _closePositionValue(_tokenId, _valueToBurn);
+        _burnValue(_tokenId, _valueToBurn);
 
+        //emit event
     }
 
-    function _calculateCurrentNAV(uint256 _tokenId, uint256 _entryYield) internal view returns (uint256 currentNAV) {
-        uint256 slot = slotOf(_tokenId);
-        uint256 currentYield = s_lastValidYieldPerSlot[slot];
-        uint256 D_mod = _getDmodForSlot(slot);
+    function _calculateCurrentNAV(uint256 _tokenId, uint256 _entryYield, uint256 _slot) internal view returns (uint256 currentNAV) {
+        uint256 currentYield = s_lastValidYieldPerSlot[_slot];
+        uint256 D_mod = _getDmodForSlot(_slot);
         currentNAV = YieldsMath.calculateCurrentNAV(PAR, _entryYield, currentYield, D_mod);
     }
 
@@ -251,26 +254,27 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
         uint256 _tokenId,
         uint256 _valueToBurn
     ) internal {
-        // Get the slot of the tokenId
-        //uint256 slot = slotOf(_tokenId);
+        // 1. Get the slot of the tokenId
+        uint256 slot = slotOf(_tokenId);
 
-        // 1. get position data
+        // 2. get position data
         PositionData memory positionData = s_fromIdToPositionData[_tokenId];
 
-        // Get current yield for the slot
-        //uint256 currentYield = s_lastValidYieldPerSlot[slot];
+        // 3. accrue all pending interests until now (in USDC)
+        uint256 yieldToClaim = _claimYield(_tokenId);
+        uint256 yieldToClaimInUsdc = _convertUsd18ToUsdc(yieldToClaim);
 
-        // 2. accrue all pending interests until now
-            _claimYield(_tokenId);
-
-        // 3. Calculate the current NAV based on the entry yield and current yield
-        uint256 currentNAV = _calculateCurrentNAV(_tokenId, positionData.entryYield);
+        // 4. Calculate the current NAV based on the entry yield and current yield
+        uint256 currentNAV = _calculateCurrentNAV(_tokenId, positionData.entryYield, slot);
         uint256 usdPayoutBeforeFees = (_valueToBurn * currentNAV) / PAR;
-        // 1. Burn the specified value from the ERC-3525 token
-        // 2. Send USDC amount to the user 
-        //_calculateEarlyRedeemFee(_mintTimestamp, _valueToBurn, _slot);
-        // 3. Update storage
+        
+        // 5. Send USDC amount to the user 
+        uint256 earlyRedeemFee = _calculateEarlyRedeemFee(positionData.mintTimestamp, usdPayoutBeforeFees, slot);
 
+        uint256 totalUsdcPayout = yieldToClaimInUsdc + usdPayoutBeforeFees ;
+        i_treasury.withdrawUsdcFromClosePosition(totalUsdcPayout, ownerOf(_tokenId), slot, earlyRedeemFee);
+
+        
     }
 
     function forceTransfer() onlyRole(OWNER_ROLE) public {
@@ -285,6 +289,7 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
      */
     function transferFrom(uint256, uint256, uint256) public payable override {
         revert TreasuryBondToken__FunctionDisabled();
+        // @audit-issue usare questa funzione per switchare tra slot senza fare mint burn e mint ancora
     }
 
     function transferFrom(
@@ -334,16 +339,17 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
         // sottrarre la percentuale di yield trattenuta dal protocollo come fee
         // update total fees collected
         // aggiornare total value per slot
-        _claimYield(_tokenId);
+        uint256 yieldToClaim = _claimYield(_tokenId);
     }
 
 ////////////////////////////////////////////////////////////////////
 /////////////////// Internal functions //////////////////// 
 ////////////////////////////////////////////////////////////////////  
 
-    function _claimYield(uint256 _tokenId) internal {
+                                                                // che decimali sono?
+    function _claimYield(uint256 _tokenId) internal returns (uint256 yieldToClaim) {
+        // deve bypassare il periodo in cui non possono esseree calimati i interest, questo check avviene nella public
         // 1. Recupera lo slot, il valore del token e calcola gli interessi maturati in base al tempo trascorso
-        // 2. Trasferisci gli interessi maturati in USDC al possessore del token
         // si può usare la func public che avrà un intervallo di tempo minimo tra due claim per evitare abusi
         // questa funzione viene usata anche durante i transfer
         // emette l' evento di interesse maturato
@@ -438,14 +444,14 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
     * @dev The fee decreases linearly over time until it reaches zero
     *      at the end of the penalty period.
     * @param _mintTimestamp The timestamp when the token was minted
-    * @param _value The amount being redeemed
+    * @param _usdValue The amount of usd being redeemed 
     * @param _slot The slot associated with the token
     *
     * @return feeAmount The fee amount to pay
     */
     function _calculateEarlyRedeemFee(
         uint256 _mintTimestamp,
-        uint256 _value,
+        uint256 _usdValue,
         uint256 _slot
     ) internal view returns (uint256 feeAmount) {
         uint256 penaltyPeriod = _getPenaltyPeriod(_slot); 
@@ -457,15 +463,9 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
         }
 
         uint256 remainingTime = penaltyPeriod - elapsedTime;
+        uint256 currentFeePercentage = (PERCENTAGE_EXIT_FEE_MAX * remainingTime) / penaltyPeriod;
 
-        // Linear fee decay
-        uint256 currentFeePercentage =
-            (PERCENTAGE_EXIT_FEE_MAX * remainingTime) / penaltyPeriod;
-
-        feeAmount =
-            (_value * currentFeePercentage) /
-            C.MAX_PERCENTAGE;
-
+        feeAmount =(_usdValue * currentFeePercentage) / C.MAX_PERCENTAGE;
         return feeAmount;
     }
 
@@ -492,7 +492,6 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
         revert TreasuryBondToken__InvalidSlot();
     }
     
-
     /**
      * @notice Internal function to validate that a slot is one of the predefined constants.
      * @dev Ensures that the provided slot is valid.

@@ -53,28 +53,37 @@ contract Treasury is AccessControl, ITreasury {
 
     }
 
-    function withdrawUsdcFromClosePosition(uint256 _amount, address _to, uint256 _slot) external onlyRole(WITHDRAW_ROLE){
+    function withdrawUsdcFromClosePosition(uint256 _amount, address _to, uint256 _slot, uint256 _exitFee) external onlyRole(WITHDRAW_ROLE){
         if(_amount > s_totalUsdcPerSlot[_slot]){
-            revert Treasury__AmountExceedsUsdcInSlot();
+            revert Treasury__InsufficientLiquidity();
         }
+
+        // 1. get net amount after fees
+        uint256 usdcNet = _amount - _exitFee;
+
         // 1. update accounting 
         s_totalUsdcPerSlot[_slot] -= _amount;
+        s_totalFeesCollected += _exitFee.toUint128();
+        s_totalFeesToBeCollected += _exitFee.toUint128();
         // 2. transfer USDC from the treasury to the user
-        i_usdc.safeTransfer(_to, _amount);
+        i_usdc.safeTransfer(_to, usdcNet);
         
         // 3. emit event usdcWithdrawnFromClosePosition
-        emit usdcWithdrawnFromClosePosition(_amount, _to, _slot);
+        emit usdcWithdrawnFromClosePosition(_amount, _to, _slot, _exitFee);
     }
 
     function injectLiquidity(uint256 _amount, uint256 _slot) external onlyRole(DEPOSIT_ROLE){
         // 1. update accounting 
         s_totalUsdcPerSlot[_slot] += _amount;
+
         // 2. transfer USDC from the admin to the treasury
         i_usdc.safeTransferFrom(msg.sender, address(this), _amount);
 
         // 3.  emit event LiquidityInjected
         emit LiquidityInjected(_amount, _slot);
     }
+
+    // @audit-info aggiungere multipleInjectLiquidity per permettere all'admin di iniettare liquidità su più slot con una singola transazione
 
     function useFeesCollectedToInjectLiquidity(uint256 _amount, uint256 _slot) external onlyRole(DEPOSIT_ROLE){
         if(_amount > s_totalFeesToBeCollected){
