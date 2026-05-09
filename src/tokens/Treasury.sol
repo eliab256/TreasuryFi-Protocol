@@ -6,6 +6,7 @@ import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
+import {TokenConstants as C} from "./TokenConstants.sol";
 
 contract Treasury is AccessControl, ITreasury {
 
@@ -30,6 +31,11 @@ contract Treasury is AccessControl, ITreasury {
     /// @dev total USDC deposited in the protocol per slot, updated on entry and exit
     mapping (uint256 => uint256) private s_totalUsdcPerSlot;
 
+    modifier onlyValidSlot(uint256 slot) {
+        _onlyValidSlot(slot);
+        _;
+    }
+
     constructor(address _treasuryBondToken, address _usdc) {
         i_treasuryBondToken = _treasuryBondToken;
         i_usdc = IERC20(_usdc);
@@ -40,52 +46,61 @@ contract Treasury is AccessControl, ITreasury {
 
     function depositUsdcFromOpenNewPosition(
         uint256 _amount, address _from, uint256 _slot, uint256 _feeAmount
-        ) external onlyRole(DEPOSIT_ROLE){
+        ) external onlyRole(DEPOSIT_ROLE) onlyValidSlot(_slot){
         // 1. update accounting 
-        s_totalFeesCollected += _feeAmount.toUint128();
-        s_totalFeesToBeCollected += _feeAmount.toUint128();
-        s_totalUsdcPerSlot[_slot] += _amount - _feeAmount;
+        uint256 totalAmount = _amount + _feeAmount;
+        s_totalUsdcPerSlot[_slot] += totalAmount;
+        _updateFeeAccounting(_feeAmount, 0, 0, _slot);
         // 2. transfer USDC from the user to the treasury
-        i_usdc.safeTransferFrom(_from, address(this), _amount);
+        i_usdc.safeTransferFrom(_from, address(this), totalAmount);
 
         // 3. emit event usdcDepositedFromOpenNewPosition
-        emit usdcDepositedFromOpenNewPosition(_amount, _from, _slot, _feeAmount);
-
+        emit usdcDepositedFromOpenNewPosition(_amount, _from, _slot);
     }
 
-    function withdrawUsdcFromClosePosition(uint256 _amount, address _to, uint256 _slot, uint256 _exitFee) external onlyRole(WITHDRAW_ROLE){
-        if(_amount > s_totalUsdcPerSlot[_slot]){
+    function withdrawUsdcFromClosePosition(uint256 _usdcPayout, address _to, uint256 _slot,uint256 _yieldPayout, uint256 _exitFee, uint256 _managementFee) 
+        external onlyRole(WITHDRAW_ROLE) onlyValidSlot(_slot){
+        // 1. get total payout
+        uint256 totalPayout = _usdcPayout + _yieldPayout;
+
+        //2. check if treasury has enough liquidity to pay the user
+        if(totalPayout > s_totalUsdcPerSlot[_slot]){
+            revert Treasury__InsufficientLiquidity();
+        }
+      
+        // 3. update accounting 
+        s_totalUsdcPerSlot[_slot] -= (totalPayout + _exitFee + _managementFee);
+        _updateFeeAccounting(0, _exitFee, _yieldPayout, _slot);
+
+        // 4. transfer USDC from the treasury to the user
+        i_usdc.safeTransfer(_to, totalPayout);
+        
+        // 5. emit event usdcWithdrawnFromClosePosition
+        emit usdcWithdrawnFromClosePosition(totalPayout, _to, _slot);
+    }
+
+    function transferUsdcFromYieldClaim(uint256 _yieldPayout, address _to, uint256 _slot, uint256 _feeOnYield) external onlyRole(WITHDRAW_ROLE) onlyValidSlot(_slot){
+        if(_yieldPayout > s_totalUsdcPerSlot[_slot]){
             revert Treasury__InsufficientLiquidity();
         }
 
-        // 1. get net amount after fees
-        uint256 usdcNet = _amount - _exitFee;
+        uint256 totalAmount = _yieldPayout + _feeOnYield;
 
         // 1. update accounting 
-        s_totalUsdcPerSlot[_slot] -= _amount;
-        s_totalFeesCollected += _exitFee.toUint128();
-        s_totalFeesToBeCollected += _exitFee.toUint128();
+        s_totalUsdcPerSlot[_slot] -= totalAmount;
+        _updateFeeAccounting(0, 0, _feeOnYield, _slot);
         // 2. transfer USDC from the treasury to the user
-        i_usdc.safeTransfer(_to, usdcNet);
+        i_usdc.safeTransfer(_to, _yieldPayout);
         
         // 3. emit event usdcWithdrawnFromClosePosition
-        emit usdcWithdrawnFromClosePosition(_amount, _to, _slot, _exitFee);
+        emit usdcWithdrawnFromClaimYield(_yieldPayout, _to, _slot);
     }
 
-    function injectLiquidity(uint256 _amount, uint256 _slot) external onlyRole(DEPOSIT_ROLE){
-        // 1. update accounting 
-        s_totalUsdcPerSlot[_slot] += _amount;
+    function useFeesCollectedToInjectLiquidity(uint256 _amount, uint256 _slot) external onlyRole(DEPOSIT_ROLE) onlyValidSlot(_slot){
+        if(_amount == type(uint256).max){
+            _amount = s_totalFeesToBeCollected;
+        }
 
-        // 2. transfer USDC from the admin to the treasury
-        i_usdc.safeTransferFrom(msg.sender, address(this), _amount);
-
-        // 3.  emit event LiquidityInjected
-        emit LiquidityInjected(_amount, _slot);
-    }
-
-    // @audit-info aggiungere multipleInjectLiquidity per permettere all'admin di iniettare liquidità su più slot con una singola transazione
-
-    function useFeesCollectedToInjectLiquidity(uint256 _amount, uint256 _slot) external onlyRole(DEPOSIT_ROLE){
         if(_amount > s_totalFeesToBeCollected){
             revert Treasury__AmountExceedsFeesToBeCollected();
         }
@@ -110,6 +125,65 @@ contract Treasury is AccessControl, ITreasury {
         // 2. transfer USDC from the treasury to the fee collector
         i_usdc.safeTransfer(_to, _amount);
     }
+
+    function injectLiquidity(uint256 _amount, uint256 _slot) external onlyRole(DEPOSIT_ROLE) onlyValidSlot(_slot){
+        // 1. update accounting 
+        s_totalUsdcPerSlot[_slot] += _amount;
+
+        // 2. transfer USDC from the admin to the treasury
+        i_usdc.safeTransferFrom(msg.sender, address(this), _amount);
+
+        // 3.  emit event LiquidityInjected
+        emit LiquidityInjected(_amount, _slot);
+    }
+
+    function injectLiquidityOnMultipleSlots(uint256[] calldata _amounts, uint256[] calldata _slots) external onlyRole(DEPOSIT_ROLE){
+        uint256 amountsLength = _amounts.length;
+        uint256 slotsLength = _slots.length;
+        if(amountsLength != 4 || slotsLength != 4){
+            revert Treasury__InvalidArrayInput();
+        }
+
+        unchecked{
+            for(uint256 i = 0; i < slotsLength; i++){
+                _onlyValidSlot(_slots[i]);
+            }
+        }
+            
+        uint256 totalAmount;
+        for(uint256 i = 0; i < slotsLength; i++){
+            s_totalUsdcPerSlot[_slots[i]] += _amounts[i];
+            totalAmount += _amounts[i];
+            emit LiquidityInjected(_amounts[i], _slots[i]);
+        }
+        i_usdc.safeTransferFrom(msg.sender, address(this), totalAmount);
+    }
+
+    function _updateFeeAccounting(uint256 _feeOnDeposit, uint256 _feeOnExit, uint256 _feeOnYield, uint256 _slot) internal {
+        s_totalFeesCollected += (_feeOnDeposit + _feeOnExit + _feeOnYield).toUint128();
+        s_totalFeesToBeCollected += (_feeOnDeposit + _feeOnExit + _feeOnYield).toUint128();
+
+        emit FeeGenerated(_feeOnDeposit, _feeOnYield, _feeOnExit, _slot);
+    }
+
+    /**
+     * @notice Internal function to validate that a slot is one of the predefined constants.
+     * @dev Ensures that the provided slot is valid.
+     * @param _slot The slot to validate.
+     * Reverts if the slot is not one of the predefined constants (2Y, 5Y, 10Y, 30Y).
+     */
+    function _onlyValidSlot(uint256 _slot) internal pure {
+        if (
+            _slot != C.SLOT_2Y &&
+            _slot != C.SLOT_5Y &&
+            _slot != C.SLOT_10Y &&
+            _slot != C.SLOT_30Y
+        ) {
+            revert TreasuryBondToken__InvalidSlot();
+        }
+    }
+
+    // @audit-info aggiungere multipleInjectLiquidity per permettere all'admin di iniettare liquidità su più slot con una singola transazione
 
     function getTotalFeesCollected() external view returns (uint256){
         return s_totalFeesCollected;

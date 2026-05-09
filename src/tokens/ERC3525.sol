@@ -137,6 +137,10 @@ contract ERC3525 is Context, IERC3525, IERC721Enumerable {
     function slotOf(
         uint256 _tokenId
     ) public view virtual override onlyMinted(_tokenId) returns (uint256) {
+        return _slotOf(_tokenId);
+    }
+
+    function _slotOf(uint256 _tokenId) internal view returns(uint256){
         return _allTokens[_allTokensIndex[_tokenId]].slot;
     }
 

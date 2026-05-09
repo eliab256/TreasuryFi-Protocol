@@ -140,6 +140,85 @@ abstract contract UsdcUsdConverter {
         usdcAmount = Math.mulDiv(usd8Amount, usdcDecimals, usdcPrice);
     }
 
+    /**
+     * @notice Converts multiple USD (18 decimals) amounts to USDC with a single price feed call.
+     * @dev Recommended for internal use: passes arrays by memory pointer, no abi.encode/decode overhead.
+     *      Calls the price feed exactly once regardless of array length.
+     * @param _usdAmounts Array of USD amounts to convert (18 decimals each).
+     * @return usdcAmounts Array of equivalent USDC amounts (6 decimals each), same length as input.
+     */
+    function _convertMultipleUsd18ToUsdcArray(
+        uint256[] memory _usdAmounts
+    ) internal view returns (uint256[] memory usdcAmounts) {
+        uint256 usdcPrice = _getLatestUsdcPrice();
+        uint256 len = _usdAmounts.length;
+        usdcAmounts = new uint256[](len);
+
+        unchecked {
+            for (uint256 i = 0; i < len; i++) {
+                uint256 numerator = Math.mulDiv(_usdAmounts[i], i_usdcDecimals, i_decimalsStandard);
+                usdcAmounts[i] = Math.mulDiv(numerator, i_usdcPriceFeedDecimals, usdcPrice);
+            }
+        }
+    }
+
+    /**
+     * @notice Converts multiple USDC amounts to USD (18 decimals) with a single price feed call.
+     * @dev Uses bytes encoding as requested. For internal-only usage prefer
+     *      _convertMultipleUsdcToUsd18Array which avoids the abi.encode/decode overhead.
+     *      Input bytes must be abi-encoded as a packed sequence of _numberOfConversion uint256 values
+     *      (i.e. the raw word-by-word layout written directly, no dynamic-array length prefix).
+     *      Output bytes is abi.encode(uint256[]) and must be decoded by the caller accordingly.
+     * @param _numberOfConversion Number of values packed in _valuesToConvert.
+     * @param _valuesToConvert Packed USDC amounts — each slot is 32 bytes, no length prefix.
+     * @return convertedValues abi.encode(uint256[]) of USD18 amounts.
+     */
+    function _convertMultipleUsdcToUsd18(
+        uint256 _numberOfConversion,
+        bytes memory _valuesToConvert
+    ) internal view returns (bytes memory convertedValues) {
+        uint256 usdcPrice = _getLatestUsdcPrice();
+
+        uint256[] memory results = new uint256[](_numberOfConversion);
+
+        unchecked {
+            for (uint256 i = 0; i < _numberOfConversion; i++) {
+                uint256 usdcAmount;
+                assembly {
+                    // _valuesToConvert starts with a 32-byte length field (bytes memory layout).
+                    // Skip it with add(..., 0x20), then read the i-th 32-byte slot.
+                    usdcAmount := mload(add(add(_valuesToConvert, 0x20), mul(i, 0x20)))
+                }
+                uint256 numerator = Math.mulDiv(usdcAmount, usdcPrice, i_usdcDecimals);
+                results[i] = Math.mulDiv(numerator, i_decimalsStandard, i_usdcPriceFeedDecimals);
+            }
+        }
+
+        convertedValues = abi.encode(results);
+    }
+
+    /**
+     * @notice Gas-efficient alternative to _convertMultipleUsdcToUsd18.
+     * @dev Recommended for internal use: passes arrays by memory pointer, no abi.encode/decode overhead.
+     *      Calls the price feed exactly once regardless of array length.
+     * @param _usdcAmounts Array of USDC amounts to convert (6 decimals each).
+     * @return usdAmounts Array of equivalent USD values (18 decimals each), same length as input.
+     */
+    function _convertMultipleUsdcToUsd18Array(
+        uint256[] memory _usdcAmounts
+    ) internal view returns (uint256[] memory usdAmounts) {
+        uint256 usdcPrice = _getLatestUsdcPrice();
+        uint256 len = _usdcAmounts.length;
+        usdAmounts = new uint256[](len);
+
+        unchecked {
+            for (uint256 i = 0; i < len; i++) {
+                uint256 numerator = Math.mulDiv(_usdcAmounts[i], usdcPrice, i_usdcDecimals);
+                usdAmounts[i] = Math.mulDiv(numerator, i_decimalsStandard, i_usdcPriceFeedDecimals);
+            }
+        }
+    }
+
     function _getLatestUsdcPrice() internal view returns (uint256) {
         (
             uint80 roundId,

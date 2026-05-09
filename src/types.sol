@@ -2,7 +2,7 @@
 pragma solidity ^0.8.0;
 
 struct BondYieldsResponse {
-    uint256 twoYearYield;
+    uint256 twoYearYield; // 1% = 10000, 4.5% = 45000 (basis points x 100)
     uint256 fiveYearYield;
     uint256 tenYearYield;
     uint256 thirtyYearYield;
