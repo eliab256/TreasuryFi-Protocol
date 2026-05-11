@@ -430,7 +430,7 @@ abstract contract RiskManager {
 
         // 5. Update storage
         // 5.1 Update total liabilities for the slot
-        s_totalLiabilitiesPerSlot[_slot] += _value;
+       
 
     }
 

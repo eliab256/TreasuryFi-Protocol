@@ -12,7 +12,6 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {
     IERC20Metadata
 } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-
 import {
     IIdentityRegistry
 } from "@t-rex/registry/interface/IIdentityRegistry.sol";
@@ -24,7 +23,7 @@ import {TokenConstants as C} from "./TokenConstants.sol";
 import {IBondAutomation} from "../interfaces/IBondAutomation.sol";
 import {IReservesAutomation} from "../interfaces/IReservesAutomation.sol";
 import {ITreasury} from "../interfaces/ITreasury.sol";
-
+import {ITreasuryBondToken} from "../interfaces/ITreasuryBondToken.sol";
 
 
 /**
@@ -34,56 +33,7 @@ import {ITreasury} from "../interfaces/ITreasury.sol";
  * Users can open new positions by depositing USDC and minting tokens, or close positions by burning tokens and withdrawing USDC.
  * The contract includes role-based access control for fee management and administrative functions.
  */
-contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, ReentrancyGuard{
-
-    // Nuovi eventi
-    event PositionOpened(
-        address indexed owner,
-        uint256 indexed tokenId,
-        uint256 indexed slot,
-        uint256 usdcDeposited,         
-        uint256 valueMinted,      
-        uint256 entryNAV      
-    );
-    event PositionClosed(
-        address indexed owner,
-        uint256 indexed tokenId,
-        uint256 indexed slot,
-        uint256 valueBurned,
-        uint256 usdcPayout,
-        uint256 exitNAV
-    );
-    event PartialPositionClosed(
-        address indexed owner,
-        uint256 indexed tokenId,
-        uint256 indexed slot,
-        uint256 valueBurned,
-        uint256 valueRemaining,  // used on partial only
-        uint256 usdcPayout,
-        uint256 exitNAV
-    );
-    event YieldClaimed(address indexed user, uint256 indexed tokenId, uint256 yieldAmount, uint256 feeCollected);
-    event ForceTransfer(address indexed from, address indexed to, uint256 indexed tokenId, uint256 value);
-    event EntryFeeCollected(address indexed user, uint256 amount);
-    event ExitFeeCollected(address indexed user, uint256 amount);
-    event YieldFeeCollected(address indexed user, uint256 amount);
-    event IdentityRegistrySet(address indexed identityRegistry);
-    
-    error TreasuryBondToken__InvalidSlot();
-    error TreasuryBondToken__FunctionDisabled();
-    error TreasuryBondToken__NotApprovedOrOwner();
-    error TreasuryBondToken__EtherNotAccepted();
-    error TreasuryBondToken__InvalidValue();
-    error TreasuryBondToken__ZeroAddress();
-    error TreasuryBondToken__InvalidOracle(address oracle, bytes4 interfaceId);
-    error TreasuryBondToken__InvalidAutomation(address automation, bytes4 interfaceId);
-    error TreasuryBondToken__SenderNotVerified();
-    error TreasuryBondToken__ReceiverNotVerified();
-    error TreasuryBondToken__WalletAlreadyFrozen();
-    error TreasuryBondToken__WalletNotFrozen();
-    error TreasuryBondToken__AmountExceedsAvailableBalance();
-    error TreasuryBondToken__AmountShouldBeLessOrEqualToFrozen();
-    error TreasuryBondToken__LockPeriodNotElapsed();
+contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager, UsdcUsdConverter, ReentrancyGuard{
 
     /// @dev constant unit value to calculate NAV.
     uint256 internal constant PAR = 1e18; 
@@ -226,21 +176,10 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
         // 3.  convert net amount from usdc to usd with std decimals (18)
         uint256 netAmountInUsd = _convertUsdcToUsd18(netAmount);
 
-        // 4. get current yield from slot
-        uint256 currentYield = s_lastValidYieldPerSlot[_slot];
-
-        // 5. call _mint to: checks ERC3643, checks RiskManager, checks ERc3525 accounting, 
+        // 4. call _mint to: checks ERC3643, checks RiskManager, checks ERc3525 accounting, 
         uint256 newTokenId = _mint(_mintTo, _slot, netAmountInUsd);
         
-        // 6. Update positionData struct
-        s_fromIdToPositionData[newTokenId] = PositionData({
-            entryYield: currentYield, 
-            entryNAV: PAR,
-            mintTimestamp: block.timestamp,
-            lastClaimTimestamp: block.timestamp
-        });
-        
-        // 7. emit event newPositionOpened
+        // 5. emit event newPositionOpened
         emit PositionOpened(_mintTo, newTokenId, _slot, _value, netAmountInUsd, PAR);
     }
 
@@ -287,33 +226,18 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
         PositionData memory posData = s_fromIdToPositionData[_tokenId];
 
         // 3. accrue all pending interests until now (in USDC)
-        (uint256 netYieldToClaim, uint256 managmentFee) = _claimYield(_tokenId, posData);
-        // @audit-info dividere correttamente l' accounting dei net value e delle fee
+        (netYieldToClaimInUsdc, managmentFeeInUsdc) = _claimYield(_tokenId, posData);
 
         // 4. Calculate the current NAV based on the entry yield and current yield  
         currentNAV = _calculateCurrentNAV(posData.entryYield, currentYield, _slot);
         uint256 usdPayoutBeforeFees = (_valueToBurn * currentNAV) / PAR;
 
         // 5. Convert payout and fees from USD with 18 decimals to USDC with 6 decimals
-        netYieldToClaimInUsdc;
-        managmentFeeInUsdc;
-        uint256 usdcPayoutBeforeFees;
-        {
-            uint256[] memory usdAmounts = new uint256[](3);
-            usdAmounts[0] = netYieldToClaim;
-            usdAmounts[1] = usdPayoutBeforeFees;
-            usdAmounts[2] = managmentFee;
-
-            uint256[] memory usdcAmounts = _convertMultipleUsd18ToUsdcArray(usdAmounts);
-            netYieldToClaimInUsdc = usdcAmounts[0];
-            usdcPayoutBeforeFees = usdcAmounts[1];
-            managmentFeeInUsdc = usdcAmounts[2]; 
-        }    
-            
+  
+        uint256 usdcPayoutBeforeFees = _convertUsd18ToUsdc(usdPayoutBeforeFees);
         // 6. Calculate early redeem fee if the position is closed before the penalty period for that slot
         earlyRedeemFeeUsdc = _calculateEarlyRedeemFee(posData.mintTimestamp, usdcPayoutBeforeFees, _slot);
         
-
         // 7. Returns parameter to call treasury withdraw function 
         usdcPayout = usdcPayoutBeforeFees - earlyRedeemFeeUsdc;
         return (usdcPayout, netYieldToClaimInUsdc, managmentFeeInUsdc , earlyRedeemFeeUsdc, currentNAV);
@@ -331,8 +255,9 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
         address _to,
         uint256 _value
     ) public payable override etherNotAccepted  returns (uint256 newTokenId) {
-        _claimYieldBeforeTransfer(_fromTokenId, _to);
         newTokenId = super.transferFrom(_fromTokenId, _to, _value);
+                // @audit-issue capire come e dove implementare i check su receiver
+        //_checkOnERC721Received(_from, _to, _tokenId, "");
     }
 
     /**
@@ -349,7 +274,8 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
         address _to,
         uint256 _tokenId
     ) public payable override etherNotAccepted nonReentrant{
-        _claimYieldBeforeTransfer(_tokenId, _to);
+        // @audit-issue capire come e dove implementare i check su receiver
+        //_checkOnERC721Received(_from, _to, _tokenId, "");
         super.transferFrom(_from, _to, _tokenId);
     }
 
@@ -359,7 +285,6 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
         uint256 _tokenId,
         bytes memory _data
     ) public payable override etherNotAccepted  {
-        _claimYieldBeforeTransfer(_tokenId, _to);
         super.safeTransferFrom(_from, _to, _tokenId, _data);
     }
 
@@ -368,7 +293,6 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
         address _to,
         uint256 _tokenId
     ) public payable override etherNotAccepted  {
-        _claimYieldBeforeTransfer(_tokenId, _to);
         super.safeTransferFrom(_from, _to, _tokenId, "");
     }
 
@@ -381,7 +305,7 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
             revert TreasuryBondToken__LockPeriodNotElapsed();
         }
 
-        // 3. get slot from tokenId
+        // 3. get slot and balance from tokenId
         uint256 slot = _slotOf(_tokenId);
 
         // 4. get total yield to claim in usd with 18 decimals, this function also updates the lastClaimTimestamp to now
@@ -396,36 +320,35 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
 //////////////////////// Internal functions //////////////////////// 
 ////////////////////////////////////////////////////////////////////  
 
-    function _claimYield(uint256 _tokenId, PositionData memory positionData) internal returns (uint256 netPayout, uint256 managmentFee) {
-
+    function _claimYield(uint256 _tokenId, PositionData memory positionData) internal returns (uint256 netPayoutUsdc, uint256 managmentFeeUsdc) {
+        // 1.  Get balance of token
+        uint256 value = balanceOf(_tokenId);
         // questa funzione viene usata anche durante i transfer 
-        uint256 principalUsd = YieldsMath.calculatePrincipalUsd(balanceOf(_tokenId), positionData.entryNAV, PAR);
+        uint256 principalUsd = YieldsMath.calculatePrincipalUsd(value , positionData.entryNAV, PAR);
         uint256 elapsedTime = block.timestamp - positionData.lastClaimTimestamp;
         uint256 grossAccrued = principalUsd * positionData.entryYield * elapsedTime / (365 days * C.PERCENTAGE_PRECISION);
 
         // retreive managment fee and net payout from gross accrued yield
-        managmentFee = grossAccrued * PERCENTAGE_YIELD_FEE / C.MAX_PERCENTAGE;
-        netPayout = grossAccrued - managmentFee;
+        uint256 managmentFee = grossAccrued * PERCENTAGE_YIELD_FEE / C.MAX_PERCENTAGE;
+        uint256 netPayout = grossAccrued - managmentFee;
+
+        // 5. Convert payout and fees from USD with 18 decimals to USDC with 6 decimals
+        netPayoutUsdc;
+        managmentFeeUsdc;
+        {
+            uint256[] memory usdAmounts = new uint256[](2);
+            usdAmounts[0] = netPayout;
+            usdAmounts[1] = managmentFee;
+
+            uint256[] memory usdcAmounts = _convertMultipleUsd18ToUsdcArray(usdAmounts);
+            netPayoutUsdc = usdcAmounts[0];
+            managmentFeeUsdc = usdcAmounts[1]; 
+        }    
 
         // update last claim timestamp to now
         s_fromIdToPositionData[_tokenId].lastClaimTimestamp = block.timestamp;
         // chiamare trasury
         // emette l' evento di interesse maturato
-    }
-
-    function _claimYieldBeforeTransfer(uint256 _tokenId, address _to) internal {
-        //1. get slot from tokenId  
-        uint256 slot = slotOf(_tokenId);
-
-        //2. get position data from tokenId
-        PositionData memory posData = s_fromIdToPositionData[_tokenId];
-
-        //3. calculate netPayout and managment fee on yield to claim, this function also updates the lastClaimTimestamp to now
-        (uint256 netPayout, uint256 managementFee) = _claimYield(_tokenId, posData);
-
-        //4. call treasury to transfer USDC to the user, this will also update the treasury accounting 
-        //   and emit the event usdcWithdrawnFromClaimYield
-        i_treasury.transferUsdcFromYieldClaim(netPayout + managementFee, _to, slot, managementFee);
     }
 
     function _beforeValueTransfer(
@@ -441,7 +364,7 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
 
         // 2. Conditional logic based on whether it's a mint, burn, or transfer 
         if (_from == address(0)) {
-            _beforeMint(_to, _toTokenId, _slot, _value);
+            _beforeMint(_to, _fromTokenId,_toTokenId, _slot, _value);
         } else if (_to == address(0)) {
             _beforeBurn(_from, _fromTokenId, _slot, _value);
         } else {
@@ -451,6 +374,7 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
 
     function _beforeMint(
         address _to,
+        uint256 _fromTokenId,
         uint256 _toTokenId,
         uint256 _slot,
         uint256 _value
@@ -458,7 +382,31 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
         // 1. Checks on RiskManager abd update riskManagerStorage if necessary
         _riskManagerBeforeMint(_slot, _value);
 
-        // 2. @audit-issue aggiornare lo storage di treaduryBondToken prima di mintare
+        // 2. Create PositionData struct for the new tokenId
+        //  if it's a mint from the treasury (fromTokenId == 0) initialize entryYield and entryNAV with current values for the slot, 
+        //  and lastClaimTimestamp to now,
+        if( _fromTokenId == 0){
+            // 2.1.initialize entryYield and entryNAV with current values for the slot,  and lastClaimTimestamp to now
+            s_fromIdToPositionData[_toTokenId] = PositionData({
+                entryYield: s_lastValidYieldPerSlot[_slot],
+                entryNAV: PAR,
+                mintTimestamp: block.timestamp,
+                lastClaimTimestamp: block.timestamp
+            });
+        // if it's a mint from an existing tokenId (transfer or partial transfer), initialize entryYield and entryNAV with 
+        // the same values of the "from" tokenId, and update lastClaimTimestamp to now to avoid that the new token can claim 
+        // yield accrued until now based on the entryYield and entryNAV of the "from" tokenId
+        } else {
+            // 2.2. Create positionData struct for the new tokenId with the same entryYield and entryNAV of the "from" tokenId, 
+            //    but with lastClaimTimestamp updated to now
+            PositionData memory fromPosData = s_fromIdToPositionData[_fromTokenId];
+            s_fromIdToPositionData[_toTokenId] = PositionData({
+                entryYield: fromPosData.entryYield,
+                entryNAV: fromPosData.entryNAV,
+                mintTimestamp: block.timestamp,
+                lastClaimTimestamp: block.timestamp
+            });
+        }
 
     }
 
@@ -470,7 +418,12 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
     ) internal {
         // 1. Checks on RiskManager abd update riskManagerStorage if necessary
         _riskManagerBeforeBurn(_slot, _value);
-        // 2. @audit-issue aggiornare lo storage di treaduryBondToken prima di burnare
+
+        // 2. Update or delete PositionData struct for the tokenId being burned
+        // if the entire balance of the tokenId is being burned, delete the PositionData struct
+        if(balanceOf(_fromTokenId) == _value){
+            delete s_fromIdToPositionData[_fromTokenId];
+        }
     }
 
     function _beforeTransfer(
@@ -481,9 +434,11 @@ contract TreasuryBondToken is ERC3643, ERC3525, RiskManager, UsdcUsdConverter, R
         uint256 _slot,
         uint256 _value
     ) internal {
-
+        (uint256 netPayout,uint256 managementFee) = _claimYield(_fromTokenId, s_fromIdToPositionData[_fromTokenId]);
+        i_treasury.transferUsdcFromYieldClaim(netPayout + managementFee, _to, _slot, managementFee);
         // se si vuole implementare la funzione di transfer forzato dal protocol owner, è necessario aggiornare l' accounting del tot value per slot anche durante i transfer
     }
+
 
     /**
      * @notice Hook that is called after any transfer of value. This includes minting and burning.
