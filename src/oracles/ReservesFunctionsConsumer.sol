@@ -5,8 +5,9 @@ import {FunctionsClient} from "@chainlink/contracts/src/v0.8/functions/v1_3_0/Fu
 import {FunctionsRequest} from "@chainlink/contracts/src/v0.8/functions/v1_0_0/libraries/FunctionsRequest.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {IReservesOracle} from "../interfaces/IReservesOracle.sol";
+import {IReservesFunctionsConsumer} from "../interfaces/IReservesFunctionsConsumer.sol";
 
-contract ReservesFunctionsConsumer is FunctionsClient, AccessControl {
+contract ReservesFunctionsConsumer is IReservesFunctionsConsumer, FunctionsClient, AccessControl {
     using FunctionsRequest for FunctionsRequest.Request;
 
     bytes32 public constant UPDATER_ROLE = keccak256("UPDATER_ROLE");
@@ -24,6 +25,7 @@ contract ReservesFunctionsConsumer is FunctionsClient, AccessControl {
         uint32 gasLimit,
         address oracle
     ) FunctionsClient(router) {
+        if (oracle == address(0)) revert ReservesFunctionsConsumer__ZeroAddress();
         i_donID = donID;
         i_gasLimit = gasLimit;
         i_oracle = oracle;
@@ -57,7 +59,9 @@ contract ReservesFunctionsConsumer is FunctionsClient, AccessControl {
         "return Functions.encodeAbi(['uint256[4]','uint256[4]','uint256','bytes'],[bond,cash,d.timestamp,sig]);";
 
     function setSubscriptionId(uint64 id) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (id == 0) revert ReservesFunctionsConsumer__InvalidSubscriptionId();
         s_subscriptionId = id;
+        emit SubscriptionIdSet(id);
     }
 
     function sendRequest() external onlyRole(UPDATER_ROLE) returns (bytes32) {
@@ -79,24 +83,30 @@ contract ReservesFunctionsConsumer is FunctionsClient, AccessControl {
         bytes memory response,
         bytes memory err
     ) internal override {
-        require(requestId == s_lastRequestId, "bad request");
+        if (requestId != s_lastRequestId) revert ReservesFunctionsConsumer__UnexpectedRequestID(requestId);
 
-        if (err.length > 0) return;
+        uint256 timestamp;
 
-        (
-            uint256[4] memory bond,
-            uint256[4] memory cash,
-            uint256 timestamp,
-            bytes memory signature
-        ) = abi.decode(response, (uint256[4], uint256[4], uint256, bytes));
+        if (err.length == 0) {
+            (
+                uint256[4] memory bond,
+                uint256[4] memory cash,
+                uint256 ts,
+                bytes memory signature
+            ) = abi.decode(response, (uint256[4], uint256[4], uint256, bytes));
 
-        IReservesOracle(i_oracle).updateUsdValues(
-            bond,
-            cash,
-            timestamp,
-            signature,
-            err
-        );
+            timestamp = ts;
+
+            IReservesOracle(i_oracle).updateUsdValues(
+                bond,
+                cash,
+                ts,
+                signature,
+                err
+            );
+        }
+
+        emit Response(requestId, timestamp, response, err);
     }
 
     function getLastRequestId() external view returns (bytes32) {

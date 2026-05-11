@@ -21,8 +21,9 @@ struct ReservesResponse {
     uint256 tenYearUsdCashValue;
     uint256 thirtyYearUsdCashValue;
     // Aggregated values
-    uint256 cashBufferUsdTotalValue; // sum of the 4 cash buckets (8 decimals)
-    uint256 totalUsdBondsValue;      // sum of the 4 bond buckets (8 decimals)
+    uint256 cashBufferUsdTotalValue;  // sum of the 4 cash buckets (8 decimals)
+    uint256 totalUsdBondsValue;       // sum of the 4 bond buckets only (8 decimals)
+    uint256 totalUsdPortfolioValue;   // totalUsdBondsValue + cashBufferUsdTotalValue (8 decimals)
     uint256 timestamp;
 }
 

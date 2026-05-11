@@ -55,6 +55,7 @@ abstract contract RiskManager {
     /// @dev to freeze specific slots in case of detected shock or oracle malfunction without needing to pause the entire contract, updated by governance or an automated mechanism in case of shock detection
     mapping(uint256 => bool) internal s_slotFrozenByYields;
     mapping(uint256 => bool) internal s_slotFrozenByReserves;
+    
     /// @dev global mapping to check if a slot is frozen, like false || false = false
     mapping(uint256 => bool) internal s_slotFrozen;
 
@@ -264,6 +265,11 @@ abstract contract RiskManager {
             totalUsdBondsValue: (freezeSlot1 && freezeSlot2 && freezeSlot3 && freezeSlot4)
                 ? cached.totalUsdBondsValue
                 : newReservesResponse.totalUsdBondsValue,
+
+            // total portfolio value: solo se tutti frozen tieni cached, altrimenti ricalcola
+            totalUsdPortfolioValue: (freezeSlot1 && freezeSlot2 && freezeSlot3 && freezeSlot4)
+                ? cached.totalUsdPortfolioValue
+                : newReservesResponse.totalUsdPortfolioValue,
 
             timestamp: cached.timestamp
         });

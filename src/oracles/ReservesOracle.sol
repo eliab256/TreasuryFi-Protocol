@@ -17,6 +17,8 @@ contract ReservesOracle is IReservesOracle, AccessControl {
     address internal s_signer;
 
     constructor(address consumer, address signer) {
+        if (consumer == address(0) || signer == address(0))
+            revert ReservesOracle__ZeroAddress();
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(UPDATER_ROLE, consumer);
         s_signer = signer;
@@ -60,7 +62,8 @@ contract ReservesOracle is IReservesOracle, AccessControl {
             thirtyYearUsdCashValue: cash[3],
 
             cashBufferUsdTotalValue: cashSum,
-            totalUsdBondsValue: bondSum + cashSum,
+            totalUsdBondsValue: bondSum,
+            totalUsdPortfolioValue: bondSum + cashSum,
             timestamp: timestamp
         });
 
@@ -69,7 +72,7 @@ contract ReservesOracle is IReservesOracle, AccessControl {
             bond[1],
             bond[2],
             bond[3],
-            bondSum + cashSum,
+            bondSum + cashSum, // totalUsdPortfolioValue
             timestamp
         );
     }
@@ -78,13 +81,13 @@ contract ReservesOracle is IReservesOracle, AccessControl {
     // READ FUNCTIONS
     // ----------------------------
     function getAllReserves() external view returns (ReservesResponse memory) {
-        require(!_isStale(), "stale data");
+        if (_isStale()) revert ReservesOracle__DataIsStale();
         return s_state;
     }
 
     function getTotalUsdValue() external view returns (uint256) {
-        require(!_isStale(), "stale data");
-        return s_state.totalUsdBondsValue;
+        if (_isStale()) revert ReservesOracle__DataIsStale();
+        return s_state.totalUsdPortfolioValue;
     }
 
     function isStale() external view returns (bool) {
@@ -92,6 +95,7 @@ contract ReservesOracle is IReservesOracle, AccessControl {
     }
 
     function _isStale() internal view returns (bool) {
+        if (s_state.timestamp == 0) return true;
         return block.timestamp - s_state.timestamp > STALENESS_THRESHOLD;
     }
 

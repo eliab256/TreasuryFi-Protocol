@@ -76,6 +76,7 @@ contract BondOracle is IBondOracle, ERC165, AccessControl {
     }
 
     function _isStale(uint256 _yieldTimestamp) internal view returns (bool) {
+        if (_yieldTimestamp == 0) return true;
         return (block.timestamp - _yieldTimestamp) > STALENESS_THRESHOLD;
     }
 

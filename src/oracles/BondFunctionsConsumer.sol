@@ -12,6 +12,8 @@ contract BondFunctionsConsumer is
     FunctionsClient,
     AccessControl
 {
+    error BondFunctionsConsumer__InvalidAddress();
+    error BondFunctionsConsumer__InvalidResponseLength();
     using FunctionsRequest for FunctionsRequest.Request;
 
     bytes32 public constant UPDATER_ROLE = keccak256("UPDATER_ROLE");
@@ -44,6 +46,9 @@ contract BondFunctionsConsumer is
         uint32 _gasLimit,
         address _bondOracle
     ) FunctionsClient(_router) {
+        if(_router == address(0) || _bondOracle == address(0)) {
+            revert BondFunctionsConsumer__InvalidAddress();
+        }
         i_donID = _donID;
         i_gasLimit = _gasLimit;
         i_bondOracle = _bondOracle;
@@ -78,7 +83,7 @@ contract BondFunctionsConsumer is
         bytes memory response,
         bytes memory err
     ) internal override {
-        require(requestId == s_lastRequestId, "bad request id");
+        if (requestId != s_lastRequestId) revert BondFunctionsConsumer__UnexpectedRequestID(requestId);
 
         s_lastResponse = response;
         s_lastError = err;
@@ -89,7 +94,7 @@ contract BondFunctionsConsumer is
             (uint256[] memory values, uint256 ts) =
                 abi.decode(response, (uint256[], uint256));
 
-            require(values.length == 4, "invalid length");
+            if (values.length != 4) revert BondFunctionsConsumer__InvalidResponseLength();
 
             timestamp = ts;
 
