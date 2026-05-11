@@ -27,6 +27,10 @@ contract ERC3525 is Context, IERC3525, IERC721Enumerable {
     error ERC3525__ApproveValueToZeroAddress();
     error ERC3525__ApproveCallerIsNotOwnerNorApprovedForAll();
     error ERC3525__TransferCallerIsNotOwnerNorApproved();
+    error ERC3525__TransferToNonERC721Receiver();
+    error ERC3525__TransferRejectedByERC3525Receiver();
+    error ERC3525__TransferToNonERC721ReceiverImplementer();
+    error ERC3525__TransferToNonERC3525ReceiverImplementer();
 
     // Nuovi custom error
     error ERC3525__TransferRejectedByERC3525Receiver();
@@ -591,7 +595,7 @@ contract ERC3525 is Context, IERC3525, IERC721Enumerable {
         );
 
         if (!_checkOnERC3525Received(fromTokenId_, toTokenId_, value_, "")) {
-            revert("ERC3525: transfer rejected by ERC3525Receiver");
+            revert ERC3525__TransferRejectedByERC3525Receiver();
         }
     }
 
@@ -631,7 +635,7 @@ contract ERC3525 is Context, IERC3525, IERC721Enumerable {
     ) internal virtual {
         _transferTokenId(from_, to_, tokenId_);
         if (!_checkOnERC721Received(from_, to_, tokenId_, data_)) {
-            revert("ERC3525: transfer to non ERC721Receiver");
+            revert ERC3525__TransferToNonERC721Receiver();
         }
     }
 
@@ -685,7 +689,7 @@ contract ERC3525 is Context, IERC3525, IERC721Enumerable {
         address to_,
         uint256 tokenId_,
         bytes memory data_
-    ) private returns (bool) {
+    ) internal returns (bool) {
         if (_isContract(to_)) {
             try
                 IERC721Receiver(to_).onERC721Received(
@@ -698,9 +702,7 @@ contract ERC3525 is Context, IERC3525, IERC721Enumerable {
                 return retval == IERC721Receiver.onERC721Received.selector;
             } catch (bytes memory reason) {
                 if (reason.length == 0) {
-                    revert(
-                        "ERC721: transfer to non ERC721Receiver implementer"
-                    );
+                    revert ERC3525__TransferToNonERC721ReceiverImplementer();
                 } else {
                     assembly {
                         revert(add(32, reason), mload(reason))

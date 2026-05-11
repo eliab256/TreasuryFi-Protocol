@@ -256,8 +256,9 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         uint256 _value
     ) public payable override etherNotAccepted  returns (uint256 newTokenId) {
         newTokenId = super.transferFrom(_fromTokenId, _to, _value);
-                // @audit-issue capire come e dove implementare i check su receiver
-        //_checkOnERC721Received(_from, _to, _tokenId, "");
+        if(!_checkOnERC721Received(ownerOf(_fromTokenId), _to, newTokenId, "")){
+            revert ERC3525__TransferToNonERC721ReceiverImplementer();
+        }
     }
 
     /**
@@ -266,7 +267,6 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
      */
     function transferFrom(uint256, uint256, uint256) public payable override {
         revert TreasuryBondToken__FunctionDisabled();
-        // @audit-issue usare questa funzione per switchare tra slot senza fare mint burn e mint ancora
     }
 
     function transferFrom(
@@ -274,9 +274,10 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         address _to,
         uint256 _tokenId
     ) public payable override etherNotAccepted nonReentrant{
-        // @audit-issue capire come e dove implementare i check su receiver
-        //_checkOnERC721Received(_from, _to, _tokenId, "");
         super.transferFrom(_from, _to, _tokenId);
+        if(!_checkOnERC721Received(_from, _to, _tokenId, "")){
+            revert ERC3525__TransferToNonERC721ReceiverImplementer();
+        }
     }
 
     function safeTransferFrom(
