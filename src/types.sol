@@ -85,7 +85,7 @@ struct SlotRiskParams {
 struct TreasuryBondTokenConstructorParams {
     string name;
     string symbol;
-    uint8 decimalsStandard;
+    uint8 decimalsStandard; // 18
     address usdcAddress;
     address usdcPriceFeedAddress;
     address identityRegistry;

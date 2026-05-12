@@ -8,6 +8,9 @@ import {IReservesOracle} from "../interfaces/IReservesOracle.sol";
 import {IReservesFunctionsConsumer} from "../interfaces/IReservesFunctionsConsumer.sol";
 
 contract ReservesFunctionsConsumer is IReservesFunctionsConsumer, FunctionsClient, AccessControl {
+    error ReservesFunctionsConsumer__SubscriptionIdAlreadySet();
+    error ReservesFunctionsConsumer__InvalidArrayLength();
+    
     using FunctionsRequest for FunctionsRequest.Request;
 
     bytes32 public constant UPDATER_ROLE = keccak256("UPDATER_ROLE");
@@ -17,6 +20,8 @@ contract ReservesFunctionsConsumer is IReservesFunctionsConsumer, FunctionsClien
     address internal immutable i_oracle;
 
     bytes32 internal s_lastRequestId;
+    bytes internal s_lastResponse;
+    bytes internal s_lastError;
     uint64 internal s_subscriptionId;
 
     constructor(
@@ -60,6 +65,7 @@ contract ReservesFunctionsConsumer is IReservesFunctionsConsumer, FunctionsClien
 
     function setSubscriptionId(uint64 id) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (id == 0) revert ReservesFunctionsConsumer__InvalidSubscriptionId();
+        if (s_subscriptionId != 0) revert ReservesFunctionsConsumer__SubscriptionIdAlreadySet();
         s_subscriptionId = id;
         emit SubscriptionIdSet(id);
     }
@@ -85,6 +91,9 @@ contract ReservesFunctionsConsumer is IReservesFunctionsConsumer, FunctionsClien
     ) internal override {
         if (requestId != s_lastRequestId) revert ReservesFunctionsConsumer__UnexpectedRequestID(requestId);
 
+        s_lastResponse = response;
+        s_lastError = err;
+
         uint256 timestamp;
 
         if (err.length == 0) {
@@ -95,15 +104,18 @@ contract ReservesFunctionsConsumer is IReservesFunctionsConsumer, FunctionsClien
                 bytes memory signature
             ) = abi.decode(response, (uint256[4], uint256[4], uint256, bytes));
 
+            if (bond.length != 4 || cash.length != 4) revert ReservesFunctionsConsumer__InvalidArrayLength();
+
             timestamp = ts;
 
-            IReservesOracle(i_oracle).updateUsdValues(
+            try IReservesOracle(i_oracle).updateUsdValues(
                 bond,
                 cash,
                 ts,
                 signature,
                 err
-            );
+            ) {}
+            catch {}
         }
 
         emit Response(requestId, timestamp, response, err);
@@ -111,6 +123,14 @@ contract ReservesFunctionsConsumer is IReservesFunctionsConsumer, FunctionsClien
 
     function getLastRequestId() external view returns (bytes32) {
         return s_lastRequestId;
+    }
+
+    function getLastResponse() external view returns (bytes memory) {
+        return s_lastResponse;
+    }
+
+    function getLastError() external view returns (bytes memory) {
+        return s_lastError;
     }
 
     function getSubscriptionId() external view returns (uint64) {

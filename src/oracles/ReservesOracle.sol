@@ -5,8 +5,10 @@ import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {IReservesOracle} from "../interfaces/IReservesOracle.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {ReservesResponse} from "../types.sol";
+import "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import "@openzeppelin/contracts/utils/introspection/ERC165.sol";
 
-contract ReservesOracle is IReservesOracle, AccessControl {
+contract ReservesOracle is IReservesOracle, ERC165, AccessControl {
     using ECDSA for bytes32;
 
     bytes32 public constant UPDATER_ROLE = keccak256("UPDATER_ROLE");
@@ -34,7 +36,10 @@ contract ReservesOracle is IReservesOracle, AccessControl {
         bytes memory signature,
         bytes memory err
     ) external onlyRole(UPDATER_ROLE) {
-        if (err.length > 0) return;
+        if (err.length > 0) {
+            emit UsdValueUpdateFailed(err);
+            return;
+        }
 
         bytes32 hash = keccak256(
             abi.encode(bond, cash, timestamp)
@@ -101,5 +106,13 @@ contract ReservesOracle is IReservesOracle, AccessControl {
 
     function getLastUpdatedTimestamp() public view returns (uint256) {
         return s_state.timestamp;
+    }
+
+    function supportsInterface(
+        bytes4 interfaceId
+    ) public view virtual override(AccessControl, ERC165) returns (bool) {
+        return
+            interfaceId == type(IReservesOracle).interfaceId ||
+            super.supportsInterface(interfaceId);
     }
 }

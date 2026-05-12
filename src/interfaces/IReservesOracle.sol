@@ -17,6 +17,7 @@ interface IReservesOracle {
         uint256 totalUsdValue,
         uint256 timestamp
     );
+    event UsdValueUpdateFailed(bytes err);
 
     // Actions (onlyRole UPDATER_ROLE)
     function updateUsdValues(

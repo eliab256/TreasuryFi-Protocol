@@ -387,7 +387,7 @@ abstract contract RiskManager {
 ////////////////////// Liquidity validation //////////////////////// 
 ////////////////////////////////////////////////////////////////////  
     function _validateLiquidity(uint256 _slot, uint256 _requiredLiquidity) internal {
-        uint256 availableLiquidity = i_treasury.getTotalUsdcPerSlot(_slot);
+        uint256 availableLiquidity = i_treasury.getTotalUsdcLiquidityPerSlot(_slot);
         if (availableLiquidity < _requiredLiquidity) {
             revert RiskManager__InsufficientLiquidity(_slot, availableLiquidity, _requiredLiquidity);
         }

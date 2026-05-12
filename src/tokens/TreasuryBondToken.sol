@@ -203,7 +203,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         emit PartialPositionClosed(owner, _tokenId, slot, _valueToBurn, remainingBalance, usdcPayout, currentNAV);
     }
 
-    function _calculateCurrentNAV(uint256 _entryYield, uint256 _currentYield, uint256 _slot) internal view returns (uint256 currentNAV) {
+    function _calculateCurrentNAV(uint256 _entryYield, uint256 _currentYield, uint256 _slot) internal pure returns (uint256 currentNAV) {
         uint256 D_mod = _getDmodForSlot(_slot);
         currentNAV = YieldsMath.calculateCurrentNAV(PAR, _entryYield, _currentYield, D_mod);
     }

@@ -6,6 +6,7 @@ interface IReservesFunctionsConsumer {
     error ReservesFunctionsConsumer__UnexpectedRequestID(bytes32 requestId);
     error ReservesFunctionsConsumer__NotAuthorized();
     error ReservesFunctionsConsumer__InvalidSubscriptionId();
+    error ReservesFunctionsConsumer__SubscriptionIdAlreadySet();
     error ReservesFunctionsConsumer__ZeroAddress();
 
     // Events
@@ -25,6 +26,8 @@ interface IReservesFunctionsConsumer {
 
     // Getters
     function getLastRequestId() external view returns (bytes32);
+    function getLastResponse() external view returns (bytes memory);
+    function getLastError() external view returns (bytes memory);
     function getSubscriptionId() external view returns (uint64);
     function getGasLimit() external view returns (uint32);
     function getDonID() external view returns (bytes32);

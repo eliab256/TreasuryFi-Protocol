@@ -2,6 +2,8 @@
 pragma solidity ^0.8.0;
 
 library TokenConstants {
+
+    /// @dev Slot identifiers for the different bond maturities
     uint256 internal constant SLOT_2Y  = 1;
     uint256 internal constant SLOT_5Y  = 2;
     uint256 internal constant SLOT_10Y = 3;
@@ -25,10 +27,10 @@ library TokenConstants {
     * a constant value per slot rather than being recalculated for every individual bond.
     * This approximation is used to estimate NAV changes caused by yield curve movements.
     */
-    uint256 internal constant D_MOD_2Y = 1_9000;   // 1.9
-    uint256 internal constant D_MOD_5Y = 4_5000;   // 4.5
-    uint256 internal constant D_MOD_10Y = 8_5000;  // 8.5
-    uint256 internal constant D_MOD_30Y = 18_0000; // 18
+    uint256 internal constant D_MOD_2Y = 19 * PERCENTAGE_PRECISION / 10;   // 1.9
+    uint256 internal constant D_MOD_5Y = 45 * PERCENTAGE_PRECISION / 10;   // 4.5
+    uint256 internal constant D_MOD_10Y = 85 * PERCENTAGE_PRECISION / 10;  // 8.5
+    uint256 internal constant D_MOD_30Y = 18 * PERCENTAGE_PRECISION; // 18
 
     /// @dev Lock period during which early redemption fee applies, per slot
     uint256 internal constant PENALTY_PERIOD_2Y = 30 days;
@@ -36,6 +38,7 @@ library TokenConstants {
     uint256 internal constant PENALTY_PERIOD_10Y = 90 days;
     uint256 internal constant PENALTY_PERIOD_30Y = 180 days;
 
+    /// @dev The minimum time between yield claims, during which yield can only be claimed once and is not compounded.
     uint256 internal constant LOCK_PERIOD_CLAIM_YIELD = 30 days;
 
     uint256 internal constant PERCENTAGE_PRECISION = 10000;
