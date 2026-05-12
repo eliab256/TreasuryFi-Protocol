@@ -8,7 +8,17 @@ import {IBondOracle} from "../interfaces/IBondOracle.sol";
 import {IReservesOracle} from "../interfaces/IReservesOracle.sol";
 import {ITreasury} from "../interfaces/ITreasury.sol";
 
-
+/**
+ * @title RiskManager
+ * @author Eliab B. (@eliab256)
+ * @notice This abstract contract implements the risk managment layer for the TreasuryFi protocol
+ *         It provides 
+ *         - functions to validate the yields and reserves data retrieved from the oracles,
+ *         - functions to freeze/unfreeze slots in case of anomalies.
+ *         - functions to keep track of the last valid yields and reserves data, as well as the last valid yield, 
+ *           reserve and cash buffer values per slot to detect possible shocks.
+ *         - functions to verify the sanity of protocol after every transaction detecting liquidity or reserves issues.
+ */
 abstract contract RiskManager {
     error RiskManager__InvalidYield(uint256 slot, uint256 yield);
     error RiskManager__ExcessiveYieldShock(uint256 slot, uint256 shock);

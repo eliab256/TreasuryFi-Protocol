@@ -7,6 +7,13 @@ import {IModularCompliance} from "@t-rex/compliance/modular/IModularCompliance.s
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {IIdentity} from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 
+/**
+    * @title ERC3643 base implementation for ERC3525 tokens with onchain compliance and identity registry integration
+    * @author Eliab B. (@eliab256)
+    * @notice This contract provides the core ERC3643 functionality, including identity registry integration, 
+    *         compliance contract binding, pausing, freezing and recovery mechanisms. It is designed to be inherited 
+    *         by the specific token implementations.
+ */
 abstract contract ERC3643 is AccessControl {
 
     // Eventi
@@ -89,6 +96,9 @@ abstract contract ERC3643 is AccessControl {
         _setCompliance(_compliance);
     }
 
+    /**
+     * @dev Internal implementation. Public accessor with access control is exposed in TreasuryBondToken as `setIdentityRegistry`.
+     */
     function _setIdentityRegistry(
         address _identityRegistry
     ) internal {
@@ -109,6 +119,9 @@ abstract contract ERC3643 is AccessControl {
         emit UpdatedTokenInformation(s_name, _symbol, valueDecimals(), TOKEN_VERSION, s_tokenOnchainID);
     }
 
+    /**
+     * @dev Internal implementation. Public accessor with access control is exposed in TreasuryBondToken as `setOnchainID`.
+     */
     function _setOnchainID(address _onchainID) internal {
         if (_onchainID == address(0)) revert ERC3643__ZeroAddress();
         s_tokenOnchainID = _onchainID;
@@ -181,12 +194,18 @@ abstract contract ERC3643 is AccessControl {
         address newWallet
     ) external virtual;
 
+    /**
+     * @dev Internal implementation. Public accessor with access control is exposed in TreasuryBondToken as `pause`.
+     */
     function _pause() internal {
         _whenNotPaused();
         s_tokenPaused = true;
         emit Paused(msg.sender);
     }
 
+    /**
+     * @dev Internal implementation. Public accessor with access control is exposed in TreasuryBondToken as `unpause`.
+     */
     function _unpause() internal {
         _whenPaused();
         s_tokenPaused = false;
@@ -194,14 +213,20 @@ abstract contract ERC3643 is AccessControl {
     }
 
 
+    /**
+     * @dev Internal implementation. Public accessor with access control is exposed in TreasuryBondToken as `setAddressFrozen`.
+     */
     function _setAddressFrozen(address _userAddress, bool _freeze) internal {
         s_frozenWallets[_userAddress] = _freeze;
 
         emit AddressFrozen(_userAddress, _freeze, msg.sender);
     }
 
+    /**
+     * @dev Internal implementation. Public accessor with access control is exposed in TreasuryBondToken as `freezePartialTokens`.
+     */
     function _freezePartialToken(uint256 _tokenId, uint256 _amount) internal {
-        uint256 tokenValue  = balanceOf(_tokenId);        // valore del token
+        uint256 tokenValue  = balanceOf(_tokenId);        // Token value
         uint256 frozenValue = s_frozenValues[_tokenId];
 
         if (tokenValue < frozenValue + _amount) {
@@ -212,6 +237,9 @@ abstract contract ERC3643 is AccessControl {
         emit TokenValueFrozen(_tokenId, _amount);
     }
 
+    /**
+     * @dev Internal implementation. Public accessor with access control is exposed in TreasuryBondToken as `unfreezePartialTokens`.
+     */
     function _unfreezePartialToken(uint256 _tokenId, uint256 _amount) internal {
         uint256 frozenValue = s_frozenValues[_tokenId];
 
@@ -243,6 +271,9 @@ abstract contract ERC3643 is AccessControl {
         }
     }
 
+    /**
+     * @dev Internal implementation. Public accessor with access control is exposed in TreasuryBondToken as `setCompliance`.
+     */
     function _setCompliance(address _compliance) internal {
         if (address(s_tokenCompliance) != address(0)) {
             s_tokenCompliance.unbindToken(address(this));

@@ -8,6 +8,11 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {TokenConstants as C} from "./TokenConstants.sol";
 
+/**
+ * @title Treasury
+ * @author Eliab B. (@eliab256)
+ * @notice This contract manages the USDC deposits, withdrawals, and fee accounting for the TreasuryFi protocol.
+ */
 contract Treasury is AccessControl, ITreasury {
 
     using SafeCast for uint256;
@@ -44,6 +49,7 @@ contract Treasury is AccessControl, ITreasury {
         _setupRole(DEPOSIT_ROLE, _treasuryBondToken);
     }
 
+    /// @dev Inherited from ITreasury. See interface for details.
     function depositUsdcFromOpenNewPosition(
         uint256 _amount, address _from, uint256 _slot, uint256 _feeAmount
         ) external onlyRole(DEPOSIT_ROLE) onlyValidSlot(_slot){
@@ -58,6 +64,7 @@ contract Treasury is AccessControl, ITreasury {
         emit usdcDepositedFromOpenNewPosition(_amount, _from, _slot);
     }
 
+    /// @dev Inherited from ITreasury. See interface for details.
     function withdrawUsdcFromClosePosition(uint256 _usdcPayout, address _to, uint256 _slot,uint256 _yieldPayout, uint256 _exitFee, uint256 _managementFee) 
         external onlyRole(WITHDRAW_ROLE) onlyValidSlot(_slot){
         // 1. get total payout
@@ -79,6 +86,7 @@ contract Treasury is AccessControl, ITreasury {
         emit usdcWithdrawnFromClosePosition(totalPayout, _to, _slot);
     }
 
+    /// @dev Inherited from ITreasury. See interface for details.
     function transferUsdcFromYieldClaim(uint256 _yieldPayout, address _to, uint256 _slot, uint256 _feeOnYield) external onlyRole(WITHDRAW_ROLE) onlyValidSlot(_slot){
         if(_yieldPayout > s_totalUsdcPerSlot[_slot]){
             revert Treasury__InsufficientLiquidity();
@@ -96,6 +104,7 @@ contract Treasury is AccessControl, ITreasury {
         emit usdcWithdrawnFromClaimYield(_yieldPayout, _to, _slot);
     }
 
+    /// @dev Inherited from ITreasury. See interface for details.
     function useFeesCollectedToInjectLiquidity(uint256 _amount, uint256 _slot) external onlyRole(DEPOSIT_ROLE) onlyValidSlot(_slot){
         if(_amount == type(uint256).max){
             _amount = s_totalFeesToBeCollected;
@@ -115,6 +124,7 @@ contract Treasury is AccessControl, ITreasury {
         emit FeesUsedToInjectLiquidity(_amount, _slot);
     }
 
+    /// @dev Inherited from ITreasury. See interface for details.
     function collectFees(uint256 _amount, address _to) external onlyRole(DEPOSIT_ROLE){
         if(_amount > s_totalFeesToBeCollected){
             revert Treasury__AmountExceedsTotalFeesToBeCollected();
@@ -126,6 +136,7 @@ contract Treasury is AccessControl, ITreasury {
         i_usdc.safeTransfer(_to, _amount);
     }
 
+    /// @dev Inherited from ITreasury. See interface for details.
     function injectLiquidity(uint256 _amount, uint256 _slot) external onlyRole(DEPOSIT_ROLE) onlyValidSlot(_slot){
         // 1. update accounting 
         s_totalUsdcPerSlot[_slot] += _amount;
@@ -137,6 +148,7 @@ contract Treasury is AccessControl, ITreasury {
         emit LiquidityInjected(_amount, _slot);
     }
 
+    /// @dev Inherited from ITreasury. See interface for details.
     function injectLiquidityOnMultipleSlots(uint256[] calldata _amounts, uint256[] calldata _slots) external onlyRole(DEPOSIT_ROLE){
         uint256 amountsLength = _amounts.length;
         uint256 slotsLength = _slots.length;
@@ -159,6 +171,15 @@ contract Treasury is AccessControl, ITreasury {
         i_usdc.safeTransferFrom(msg.sender, address(this), totalAmount);
     }
 
+    /**
+     * @notice Internal function to update fee accounting variables and emit FeeGenerated event.
+     * @dev This function is called whenever fees are generated on deposit, exit or yield claim to 
+     *      keep track of total fees collected and fees to be collected.
+     * @param _feeOnDeposit The amount of fees generated on deposit.
+     * @param _feeOnExit The amount of fees generated on exit.
+     * @param _feeOnYield The amount of fees generated on yield claim.
+     * @param _slot The slot corresponding to the bond for which fees are being generated (2Y, 5Y, 10Y, or 30Y).
+     */
     function _updateFeeAccounting(uint256 _feeOnDeposit, uint256 _feeOnExit, uint256 _feeOnYield, uint256 _slot) internal {
         s_totalFeesCollected += (_feeOnDeposit + _feeOnExit + _feeOnYield).toUint128();
         s_totalFeesToBeCollected += (_feeOnDeposit + _feeOnExit + _feeOnYield).toUint128();
@@ -183,17 +204,18 @@ contract Treasury is AccessControl, ITreasury {
         }
     }
 
-    // @audit-info aggiungere multipleInjectLiquidity per permettere all'admin di iniettare liquidità su più slot con una singola transazione
-
+    /// @dev Inherited from ITreasury. See interface for details.
     function getTotalFeesCollected() external view returns (uint256){
         return s_totalFeesCollected;
     }
 
+    /// @dev Inherited from ITreasury. See interface for details.
     function getTotalFeesToBeCollected() external view returns (uint256){
         return s_totalFeesToBeCollected;
     }
 
-    function getTotalUsdcPerSlot(uint256 _slot) external view returns (uint256){
+    /// @dev Inherited from ITreasury. See interface for details.
+    function getTotalUsdcLiquidityPerSlot(uint256 _slot) external view returns (uint256){
         return s_totalUsdcPerSlot[_slot];
     }
 
