@@ -26,10 +26,7 @@ abstract contract BaseAutomation is IBaseAutomation, AccessControl {
         _grantRole(AUTOMATION_ADMIN_ROLE, initialAdmin);
     }
 
-    /**
-     * @notice Sets the Chainlink Automation forwarder address
-     * @dev Can only be set once by an admin
-     */
+    /// @dev Inherited from IBaseAutomation. See interface for details.
     function setChainlinkForwarder(
         address _chainlinkForwarder
     ) external onlyRole(AUTOMATION_ADMIN_ROLE) {
@@ -41,10 +38,7 @@ abstract contract BaseAutomation is IBaseAutomation, AccessControl {
         s_chainlinkForwarder = _chainlinkForwarder;
     }
 
-    /**
-     * @notice Sets the upkeep ID
-     * @dev Can only be set once by an admin
-     */
+    /// @dev Inherited from IBaseAutomation. See interface for details.
     function setUpkeepId(
         uint256 _upkeepId
     ) external onlyRole(AUTOMATION_ADMIN_ROLE) {
@@ -57,8 +51,9 @@ abstract contract BaseAutomation is IBaseAutomation, AccessControl {
     }
 
     /**
-     * @notice Checks if upkeep is needed based on the interval
-     */
+     * @notice Checks if upkeep is needed based on the interval and last upkeep time
+     * @dev Inherited from IBaseAutomation. See interface for details.
+     */ 
     function checkUpkeep(
         bytes calldata
     ) public view override returns (bool upkeepNeeded, bytes memory) {
@@ -68,6 +63,7 @@ abstract contract BaseAutomation is IBaseAutomation, AccessControl {
 
     /**
      * @notice Performs the upkeep with grace period logic
+     * @dev Inherited from IBaseAutomation. See interface for details.
      * - During grace period: only Chainlink Automation can call
      * - After grace period: owner or Chainlink Automation can call
      */
@@ -109,26 +105,33 @@ abstract contract BaseAutomation is IBaseAutomation, AccessControl {
     function _triggerRequest() internal virtual;
 
     // --- Getters ---
+
+    /// @dev Inherited from IBaseAutomation. See interface for details.
     function getChainlinkForwarder() external view returns (address) {
         return s_chainlinkForwarder;
     }
 
+    /// @dev Inherited from IBaseAutomation. See interface for details.
     function getGracePeriod() external pure returns (uint256) {
         return GRACE_PERIOD;
     } 
 
+    /// @dev Inherited from IBaseAutomation. See interface for details.
     function getUpkeepId() external view returns (uint256) {
         return s_upkeepId;
     }
 
+    /// @dev Inherited from IBaseAutomation. See interface for details.
     function getInterval() external view returns (uint256) {
         return i_interval;
     }
 
+    /// @dev Inherited from IBaseAutomation. See interface for details.
     function getLastUpkeep() external view returns (uint256) {
         return s_lastUpkeep;
     }
-
+    
+    /// @dev Inherited from IBaseAutomation. See interface for details.
     function getAllUpkeepInfo() external view returns (uint256 interval, uint256 gracePeriod, uint256 lastUpkeep) {
         return (i_interval, GRACE_PERIOD, s_lastUpkeep);
     }

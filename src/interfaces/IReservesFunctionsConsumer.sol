@@ -8,7 +8,6 @@ interface IReservesFunctionsConsumer {
     error ReservesFunctionsConsumer__InvalidSubscriptionId();
     error ReservesFunctionsConsumer__SubscriptionIdAlreadySet();
     error ReservesFunctionsConsumer__ZeroAddress();
-    error ReservesFunctionsConsumer__SubscriptionIdAlreadySet();
     error ReservesFunctionsConsumer__InvalidArrayLength();
 
     // Events

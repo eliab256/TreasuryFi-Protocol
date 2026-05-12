@@ -8,6 +8,11 @@ interface IReservesAutomation is IBaseAutomation {
     error ReservesAutomation__ZeroAddress();
 
     // --- Getters ---
+    
+    /**
+     * @notice Returns the address of the Functions consumer
+     * @return The address of the Functions consumer
+     */
     function getFunctionsConsumer() external view returns (address);
 
 }

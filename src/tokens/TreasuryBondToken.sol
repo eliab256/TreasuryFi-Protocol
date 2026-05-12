@@ -50,7 +50,14 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         _notAcceptEther();
         _;
     }
-
+    
+    /**
+     * @notice Constructor for the TreasuryBondToken contract.
+     * @dev All checks are done on this constructor and then are passed to the respective parent constructors. 
+     *      This is to ensure that if any of the parameters are invalid, the deployment will fail before any 
+     *      state changes occur in the parent contracts.
+     * @param _params The parameters required for initializing the contract. Check types.sol for details.
+     */
     constructor(
         TreasuryBondTokenConstructorParams memory _params
     ) ERC3643(_params.name, _params.symbol, _params.decimalsStandard, address(this), _params.identityRegistry, address(0)) 
@@ -116,34 +123,22 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
 ///////////////////// RiskManager inheritance ////////////////////// 
 ////////////////////////////////////////////////////////////////////  
 
-    /**
-     * @notice Function to manually trigger the reserves upkeep.
-     * @dev Can only be called by an account with the AUTOMATION_TRIGGERER_ROLE.
-     * @dev Internal function inherited from RiskManager.
-     */
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function triggerReservesUpkeep() public onlyRole(AUTOMATION_TRIGGERER_ROLE) {
         _triggerReservesUpkeep();
     }
 
-    /**
-     * @notice Function to manually trigger the bond yields upkeep.
-     * @dev Can only be called by an account with the AUTOMATION_TRIGGERER_ROLE.
-     * @dev Internal function inherited from RiskManager.
-     */
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function triggerYieldsUpkeep() public onlyRole(AUTOMATION_TRIGGERER_ROLE) {
         _triggerYieldsUpkeep();
     }
 
-    /**
-    * @notice Updates the risk manager yields values from the oracle.
-    * @dev Normally called by UpdateRiskManagerAutomation via UPDATE_RISK_MANAGER_VALUES_ROLE.
-    * The deployer retains this role as emergency fallback in case Chainlink Automation
-    * stops functioning, allowing manual intervention without governance delay.
-    */
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function updateYieldsValues() public onlyRole(UPDATE_RISK_MANAGER_VALUES_ROLE) {
         _updateYieldsValues();
     }
 
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function updateReserveValues() public onlyRole(UPDATE_RISK_MANAGER_VALUES_ROLE) {
         _updateReservesValues();
     }
@@ -151,6 +146,8 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
 ////////////////////////////////////////////////////////////////////
 /////////////////// Positions related functions //////////////////// 
 ////////////////////////////////////////////////////////////////////  
+
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function openNewPosition(
         address _mintTo,
         uint256 _slot,
@@ -173,6 +170,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         emit PositionOpened(_mintTo, newTokenId, _slot, _value, netAmountInUsd, PAR);
     }
 
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function closePosition(uint256 _tokenId) public nonReentrant onlyApprovedOrOwner(_tokenId) {
         address owner = ownerOf(_tokenId);
         uint256 slot = slotOf(_tokenId);
@@ -186,6 +184,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         emit PositionClosed(owner, _tokenId, slot, tokenBalance, usdcPayout, currentNAV);
     }
 
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function closePartialPosition(
         uint256 _tokenId,
         uint256 _valueToBurn
@@ -203,6 +202,17 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         emit PartialPositionClosed(owner, _tokenId, slot, _valueToBurn, remainingBalance, usdcPayout, currentNAV);
     }
 
+    /**
+     * @notice Internal function to calculate the current Net Asset Value (NAV) for a given position.
+     * @dev Formula (yield rose):   NAV = PAR * (MAX_PERCENTAGE - D_mod * (currentYield - entryYield) / PERCENTAGE_PRECISION) / MAX_PERCENTAGE
+     *      Formula (yield fell):   NAV = PAR * (MAX_PERCENTAGE + D_mod * (entryYield - currentYield) / PERCENTAGE_PRECISION) / MAX_PERCENTAGE
+     *      Where D_mod is the duration modifier for the slot, acting as price sensitivity to yield changes.
+     *      If the discount reaches or exceeds 100%, NAV is capped at 0.
+     * @param _entryYield The yield at the time the position was opened.
+     * @param _currentYield The current yield for the slot.
+     * @param _slot The slot identifier for the position.
+     * @return currentNAV The calculated current NAV for the position.
+     */
     function _calculateCurrentNAV(uint256 _entryYield, uint256 _currentYield, uint256 _slot) internal pure returns (uint256 currentNAV) {
         uint256 D_mod = _getDmodForSlot(_slot);
         currentNAV = YieldsMath.calculateCurrentNAV(PAR, _entryYield, _currentYield, D_mod);
@@ -237,17 +247,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         return (usdcPayout, netYieldToClaimInUsdc, managmentFeeInUsdc , earlyRedeemFeeUsdc, currentNAV);
     }
 
-    /**
-     * @notice Forces the transfer of a token from one wallet to another on behalf of a regulatory authority.
-     * @dev Bypasses standard compliance checks (frozen sender/receiver, paused state).
-     *      The receiver must still be a verified identity in the IdentityRegistry.
-     *      Accrued yield is settled to _from before the transfer.
-     *      Any frozen value on the token is released before the transfer is executed.
-     * @param _from The current owner of the token.
-     * @param _to   The receiver of the token. Must be KYC-verified.
-     * @param _tokenId The token to transfer.
-     * @return bool true if successful.
-     */
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function forceTransfer(
         address _from,
         address _to,
@@ -298,7 +298,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         _transferTokenId(_from, _to, _tokenId);
     }
 
-
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function transferFrom(
         uint256 _fromTokenId,
         address _to,
@@ -310,14 +310,12 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         }
     }
 
-    /**
-     * @notice Disabled function to prevent transfers between tokens.
-     * @dev This function is intentionally disabled to enforce the non-transferable nature of the tokens.
-     */
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function transferFrom(uint256, uint256, uint256) public payable override {
         revert TreasuryBondToken__FunctionDisabled();
     }
 
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function transferFrom(
         address _from,
         address _to,
@@ -329,6 +327,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         }
     }
 
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function safeTransferFrom(
         address _from,
         address _to,
@@ -338,6 +337,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         super.safeTransferFrom(_from, _to, _tokenId, _data);
     }
 
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function safeTransferFrom(
         address _from,
         address _to,
@@ -346,6 +346,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         super.safeTransferFrom(_from, _to, _tokenId, "");
     }
 
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function claimYield(uint256 _tokenId) public nonReentrant onlyApprovedOrOwner(_tokenId){
         // 1. get position data from tokenId
         PositionData memory posData = s_fromIdToPositionData[_tokenId];
@@ -370,6 +371,13 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
 //////////////////////// Internal functions //////////////////////// 
 ////////////////////////////////////////////////////////////////////  
 
+    /**
+     * @notice Internal function to calculate and transfer accrued yield to the user before any value change (transfer, burn).
+     * @param _tokenId The ID of the token for which to claim yield.
+     * @param positionData The position data associated with the token.
+     * @return netPayoutUsdc The net payout in USDC after deducting management fees.
+     * @return managmentFeeUsdc The management fee in USDC to send to the treasury.
+     */
     function _claimYield(uint256 _tokenId, PositionData memory positionData) internal returns (uint256 netPayoutUsdc, uint256 managmentFeeUsdc) {
         // 1.  Get balance of token
         uint256 value = balanceOf(_tokenId);
@@ -510,6 +518,12 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
     ) internal override {}
 
 
+    /**
+     * @notice Calculates the entry fee for a given deposit amount based on a predefined percentage on deposit.
+     * @param _amount The amount of USDC being deposited to open a new position.
+     * @return netAmount The amount that will be actually invested after deducting the entry fee.
+     * @return feeCollected The amount of USDC collected as entry fee.
+     */
     function _calculateEntryFees(
         uint256 _amount
     ) internal pure returns (uint256 netAmount, uint256 feeCollected) {
@@ -548,6 +562,10 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
 
     /**
     * @notice Returns the penalty period associated with a slot
+    * @dev Each slot has a predefined penalty period constant. 
+    *      This function maps the slot ID to its corresponding penalty period.
+    * @param _slot The slot ID for which to get the penalty period
+    * @return The penalty period in seconds for the given slot
     */
     function _getPenaltyPeriod(uint256 _slot) internal pure returns (uint256) {
         if (_slot == C.SLOT_2Y) {
@@ -588,7 +606,10 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
 
     /**
      * @notice Internal function to prevent acceptance of Ether.
-     * @dev Reverts if any Ether is sent to the contract. This is important to prevent accidental loss of funds, as the contract is designed to work with USDC and not Ether.
+     * @dev Reverts if any Ether is sent to the contract. This is important to prevent accidental 
+     *      loss of funds, as the contract is designed to work with USDC and not Ether.
+     * @dev This function is used as a modifier on functions that should not accept Ether, 
+     *      ensuring that any attempt to send Ether will be rejected with a clear error message.
      */
     function _notAcceptEther() internal view {
         if (msg.value > 0) {
@@ -638,6 +659,14 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         return s_fromIdToPositionData[_tokenId];
     }
 
+    /**
+     * @notice Internal function to get the D-modifier for a specific bond slot.
+     * @dev This function replaces the need for a mapping or switch statement by directly returning 
+     *      the constant D-modifier based on the slot ID. This choice was made for gas optimization, 
+     *      as it avoids storage reads and allows the compiler to optimize the code more effectively.
+     * @param _slot The slot ID representing the bond maturity.
+     * @return The D-modifier for the specified slot.
+     */
     function _getDmodForSlot(uint256 _slot) internal pure returns (uint256) {
         if (_slot == C.SLOT_2Y)  return C.D_MOD_2Y;
         if (_slot == C.SLOT_5Y)  return C.D_MOD_5Y;
@@ -645,14 +674,17 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         if (_slot == C.SLOT_30Y) return C.D_MOD_30Y;
     }
 
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function name() public view override returns (string memory) {
         return super.name();
     }
 
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function symbol() public view override returns (string memory) {
         return super.symbol();
     }
 
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function valueDecimals() public view override(ERC3643, ERC3525) returns (uint8) {
         return super.valueDecimals();
     }
@@ -661,14 +693,17 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
 /////////////////////// ERC3643 inheritance //////////////////////// 
 ////////////////////////////////////////////////////////////////////  
      
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function setIdentityRegistry(address _identityRegistry) public onlyRole(OWNER_ROLE) {
         _setIdentityRegistry(_identityRegistry);
     }
 
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function setOnchainID(address _onchainID) public onlyRole(OWNER_ROLE) {
         _setOnchainID(_onchainID);
     }
 
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function setCompliance(address _compliance) public onlyRole(OWNER_ROLE) {
         _setCompliance(_compliance);
     }
@@ -706,47 +741,50 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         }
     }
 
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function pause () public onlyRole(OWNER_ROLE) {
         _pause();
     }
 
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function unpause () public onlyRole(OWNER_ROLE) {
         _unpause();
     }
 
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function setAddressFrozen(address _userAddress, bool _freeze) external onlyRole(OWNER_ROLE) {
         _setAddressFrozen(_userAddress, _freeze);
     }
 
-
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function freezePartialTokens(uint256 _tokenId, uint256 _amount) external onlyRole(OWNER_ROLE) {
         _freezePartialToken(_tokenId, _amount);
     }
 
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function unfreezePartialTokens(uint256 _tokenId, uint256 _amount) external onlyRole(OWNER_ROLE) {
         _unfreezePartialToken(_tokenId, _amount);
     }
 
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function batchSetAddressFrozen(address[] calldata _userAddresses, bool[] calldata _freeze) external onlyRole(OWNER_ROLE) {
         for (uint256 i = 0; i < _userAddresses.length; i++) {
             _setAddressFrozen(_userAddresses[i], _freeze[i]);
         }
     }
 
-
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function batchFreezePartialTokens(uint256[] calldata _tokenId, uint256[] calldata _amounts) external onlyRole(OWNER_ROLE) {
         for (uint256 i = 0; i < _tokenId.length; i++) {
             _freezePartialToken(_tokenId[i], _amounts[i]);
         }
     }
 
-
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function batchUnfreezePartialTokens(uint256[] calldata _tokenId, uint256[] calldata _amounts) external onlyRole(OWNER_ROLE) {
         for (uint256 i = 0; i < _tokenId.length; i++) {
             _unfreezePartialToken(_tokenId[i], _amounts[i]);
         }
     }
-
-
 
 }

@@ -16,6 +16,12 @@ contract ReservesAutomation is IReservesAutomation, BaseAutomation {
     
     address private s_functionsConsumer;
 
+    /**
+     * @notice Constructor for the ReservesAutomation contract.
+     * @param _functionsConsumer The address of the ReservesFunctionsConsumer contract.
+     * @param initialAdmin The initial admin address passed to the BaseAutomation constructor.
+     * @param _interval The interval between upkeeps to enable manual triggering. Passed to the BaseAutomation constructor.
+     */
     constructor(
         address _functionsConsumer,
         address initialAdmin,
@@ -27,13 +33,16 @@ contract ReservesAutomation is IReservesAutomation, BaseAutomation {
     }
 
     /**
-     * @notice Internal hook to trigger Reserves NAV update request
+     * @notice Internal hook to trigger Reserves UPDATE when upkeep is performed.
+     * @dev Overrides the _triggerRequest function in BaseAutomation to call the sendRequest function on the ReservesFunctionsConsumer contract.
      */
     function _triggerRequest() internal override {
         IReservesFunctionsConsumer(s_functionsConsumer).sendRequest();
     }
 
     // --- Getters ---
+
+    /// @dev Inherited from IReservesAutomation. See interface for details.
     function getFunctionsConsumer() external view returns (address) {
         return s_functionsConsumer;
     }

@@ -13,6 +13,12 @@ import {IBondFunctionsConsumer} from "../interfaces/IBondFunctionsConsumer.sol";
 contract BondAutomation is IBondAutomation, BaseAutomation {
     address private s_functionsConsumer;
 
+    /**
+     * @notice Constructor for the BondAutomation contract.
+     * @param _functionsConsumer The address of the BondFunctionsConsumer contract.
+     * @param initialAdmin The initial admin address passed to the BaseAutomation constructor.
+     * @param _interval The interval between upkeeps to enable manual triggering. Passed to the BaseAutomation constructor.
+     */
     constructor(
         address _functionsConsumer,
         address initialAdmin,
@@ -25,16 +31,16 @@ contract BondAutomation is IBondAutomation, BaseAutomation {
 
     /**
      * @notice Internal hook to trigger Bond yield update request
+     * @dev Overrides the _triggerRequest function from BaseAutomation to call the sendRequest function on the BondFunctionsConsumer.
      */
     function _triggerRequest() internal override {
         IBondFunctionsConsumer(s_functionsConsumer).sendRequest();
     }
 
     // --- Getters ---
+    /// @dev Inherited from IBondAutomation. See interface for details.
     function getFunctionsConsumer() external view returns (address) {
         return s_functionsConsumer;
     }
 }
 
-// Errors (defined for interface compatibility)
-error BondAutomation__ZeroAddress();

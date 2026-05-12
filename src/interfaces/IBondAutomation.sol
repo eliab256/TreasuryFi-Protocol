@@ -8,5 +8,10 @@ interface IBondAutomation is IBaseAutomation {
     error BondAutomation__ZeroAddress();
 
     // --- Getters ---
+
+    /**
+     * @notice Returns the address of the Functions consumer
+     * @return The address of the Functions consumer
+     */
     function getFunctionsConsumer() external view returns (address);
 }

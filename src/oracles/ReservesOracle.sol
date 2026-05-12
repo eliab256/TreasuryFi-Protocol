@@ -80,6 +80,15 @@ contract ReservesOracle is IReservesOracle, ERC165, AccessControl {
         );
     }
 
+    /**
+     * @dev Checks if the reserve data is stale.
+     * @return True if the data is stale, false otherwise.
+     */
+    function _isStale() internal view returns (bool) {
+        if (s_state.timestamp == 0) return true;
+        return block.timestamp - s_state.timestamp > STALENESS_THRESHOLD;
+    }
+
     /// @dev Inherited from IReservesOracle. See interface for details.
     function getAllReserves() external view returns (ReservesResponse memory) {
         if (_isStale()) revert ReservesOracle__DataIsStale();
@@ -97,10 +106,6 @@ contract ReservesOracle is IReservesOracle, ERC165, AccessControl {
         return _isStale();
     }
 
-    function _isStale() internal view returns (bool) {
-        if (s_state.timestamp == 0) return true;
-        return block.timestamp - s_state.timestamp > STALENESS_THRESHOLD;
-    }
 
     /// @dev Inherited from IReservesOracle. See interface for details.
     function getLastUpdatedTimestamp() public view returns (uint256) {
