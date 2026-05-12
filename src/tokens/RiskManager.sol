@@ -52,12 +52,13 @@ abstract contract RiskManager {
     /// @dev Mapping to track possible shocks from oracle data for each slot
     mapping(uint256 => uint256) internal s_lastValidCashBufferPerSlot;
 
-    /// @dev to freeze specific slots in case of detected shock or oracle malfunction without needing to pause the entire contract, updated by governance or an automated mechanism in case of shock detection
-    mapping(uint256 => bool) internal s_slotFrozenByYields;
-    mapping(uint256 => bool) internal s_slotFrozenByReserves;
-    
-    /// @dev global mapping to check if a slot is frozen, like false || false = false
-    mapping(uint256 => bool) internal s_slotFrozen;
+    /// @dev Per-slot freeze state packed into one storage slot (frozenByYields + frozenByReserves + frozen = 3 bools → 1 SLOAD)
+    struct SlotFreezeState {
+        bool frozenByYields;
+        bool frozenByReserves;
+        bool frozen;
+    }
+    mapping(uint256 => SlotFreezeState) internal s_slotState;
 
     /// @dev liabilities for each slot, updated on mint, burn and yield claim
     mapping(uint256 => uint256) private s_totalLiabilitiesPerSlot;
@@ -134,20 +135,22 @@ abstract contract RiskManager {
 ////////////////////// freeze slots functions ////////////////////// 
 ////////////////////////////////////////////////////////////////////  
     function _setYieldsSlotFrozen(uint256 _slot, bool _frozen) private {
-        s_slotFrozenByYields[_slot] = _frozen;    
-        bool shouldBeFrozen = _frozen || s_slotFrozenByReserves[_slot];
-        _setSlotFrozen(_slot, shouldBeFrozen);
+        SlotFreezeState storage state = s_slotState[_slot];
+        state.frozenByYields = _frozen;
+        bool shouldBeFrozen = _frozen || state.frozenByReserves;
+        _setSlotFrozen(_slot, state, shouldBeFrozen);
     }
 
     function _setReservesSlotFrozen(uint256 _slot, bool _frozen) private {
-        s_slotFrozenByReserves[_slot] = _frozen;
-        bool shouldBeFrozen = _frozen || s_slotFrozenByYields[_slot];
-        _setSlotFrozen(_slot, shouldBeFrozen);
+        SlotFreezeState storage state = s_slotState[_slot];
+        state.frozenByReserves = _frozen;
+        bool shouldBeFrozen = _frozen || state.frozenByYields;
+        _setSlotFrozen(_slot, state, shouldBeFrozen);
     }
 
-    function _setSlotFrozen(uint256 _slot, bool _frozen) private {
-        if (s_slotFrozen[_slot] == _frozen) return;
-        s_slotFrozen[_slot] = _frozen;
+    function _setSlotFrozen(uint256 _slot, SlotFreezeState storage state, bool _frozen) private {
+        if (state.frozen == _frozen) return;
+        state.frozen = _frozen;
         if (_frozen) emit SlotFrozen(_slot);
         else emit SlotUnfrozen(_slot);
     }
@@ -158,10 +161,11 @@ abstract contract RiskManager {
      * @param _frozen The new frozen state
      */
     function _setSlotFrozenOnMainContract(uint256 _slot, bool _frozen) internal {
-        if (s_slotFrozen[_slot] == _frozen) revert RiskManager__SlotAlreadyInState(_slot, _frozen);
-        s_slotFrozenByYields[_slot] = _frozen;
-        s_slotFrozenByReserves[_slot] = _frozen;
-        _setSlotFrozen(_slot, _frozen);
+        SlotFreezeState storage state = s_slotState[_slot];
+        if (state.frozen == _frozen) revert RiskManager__SlotAlreadyInState(_slot, _frozen);
+        state.frozenByYields = _frozen;
+        state.frozenByReserves = _frozen;
+        _setSlotFrozen(_slot, state, _frozen);
     }
 
     function _updateYieldsValues() internal {
@@ -275,9 +279,6 @@ abstract contract RiskManager {
         });
     }
 
-
-
-
 /////////////////////////////////////////////////////////////////////
 //////////////////////// Reserves validation ////////////////////////
 /////////////////////////////////////////////////////////////////////
@@ -359,7 +360,7 @@ abstract contract RiskManager {
         if (i_yieldsOracle.isStale()) revert RiskManager__StaleOracleData();
 
         // 2. Check if slot is frozen due to detected shock or oracle malfunction
-        if (s_slotFrozen[_slot]) revert RiskManager__SlotFrozen(_slot);
+        if (s_slotState[_slot].frozen) revert RiskManager__SlotFrozen(_slot);
 
         // 3. Retreive the current data from oracles
         yields = s_lastValidYields;
@@ -370,7 +371,7 @@ abstract contract RiskManager {
         if (i_reservesOracle.isStale()) revert RiskManager__StaleOracleData();
 
         // 2. Check if slot is frozen due to detected shock or oracle malfunction
-        if (s_slotFrozen[_slot]) revert RiskManager__SlotFrozen(_slot);
+        if (s_slotState[_slot].frozen) revert RiskManager__SlotFrozen(_slot);
 
         // 3. Retreive the current data from oracles
         reserves = s_lastValidReserves;
@@ -388,7 +389,7 @@ abstract contract RiskManager {
         if (i_reservesOracle.isStale()) revert RiskManager__StaleOracleData();
 
         // 2. Check if slot is frozen due to detected shock or oracle malfunction
-        if (s_slotFrozen[_slot]) revert RiskManager__SlotFrozen(_slot);
+        if (s_slotState[_slot].frozen) revert RiskManager__SlotFrozen(_slot);
 
         // 3. Retreive the current data from oracles
         BondYieldsResponse memory yields = s_lastValidYields;
@@ -408,7 +409,7 @@ abstract contract RiskManager {
         if (i_reservesOracle.isStale()) revert RiskManager__StaleOracleData();
 
         // 2. Check if slot is frozen due to detected shock or oracle malfunction
-        if (s_slotFrozen[_slot]) revert RiskManager__SlotFrozen(_slot);
+        if (s_slotState[_slot].frozen) revert RiskManager__SlotFrozen(_slot);
 
         // 3. Retreive the current data from oracles
         BondYieldsResponse memory yields = s_lastValidYields;
@@ -428,7 +429,7 @@ abstract contract RiskManager {
         if (i_yieldsOracle.isStale()) revert RiskManager__StaleOracleData();
         if (i_reservesOracle.isStale()) revert RiskManager__StaleOracleData();
         // 2. Check if slot is frozen due to detected shock or oracle malfunction
-        if (s_slotFrozen[_slot]) revert RiskManager__SlotFrozen(_slot);
+        if (s_slotState[_slot].frozen) revert RiskManager__SlotFrozen(_slot);
 
         // 3. Retreive the current data from oracles
         BondYieldsResponse memory yields = s_lastValidYields;

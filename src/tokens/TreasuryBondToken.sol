@@ -8,13 +8,6 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.
 import {YieldsMath} from "../library/YieldsMath.sol";
 import {RiskManager} from "./RiskManager.sol";
 import {UsdcUsdConverter} from "./UsdcUsdConverter.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {
-    IERC20Metadata
-} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import {
-    IIdentityRegistry
-} from "@t-rex/registry/interface/IIdentityRegistry.sol";
 import {IBondOracle} from "../interfaces/IBondOracle.sol";
 import {IReservesOracle} from "../interfaces/IReservesOracle.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
@@ -24,7 +17,6 @@ import {IBondAutomation} from "../interfaces/IBondAutomation.sol";
 import {IReservesAutomation} from "../interfaces/IReservesAutomation.sol";
 import {ITreasury} from "../interfaces/ITreasury.sol";
 import {ITreasuryBondToken} from "../interfaces/ITreasuryBondToken.sol";
-
 
 /**
  * @title TreasuryBondToken
@@ -383,31 +375,15 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         // 1. Checks on RiskManager abd update riskManagerStorage if necessary
         _riskManagerBeforeMint(_slot, _value);
 
-        // 2. Create PositionData struct for the new tokenId
-        //  if it's a mint from the treasury (fromTokenId == 0) initialize entryYield and entryNAV with current values for the slot, 
-        //  and lastClaimTimestamp to now,
-        if( _fromTokenId == 0){
-            // 2.1.initialize entryYield and entryNAV with current values for the slot,  and lastClaimTimestamp to now
-            s_fromIdToPositionData[_toTokenId] = PositionData({
-                entryYield: s_lastValidYieldPerSlot[_slot],
-                entryNAV: PAR,
-                mintTimestamp: block.timestamp,
-                lastClaimTimestamp: block.timestamp
-            });
-        // if it's a mint from an existing tokenId (transfer or partial transfer), initialize entryYield and entryNAV with 
-        // the same values of the "from" tokenId, and update lastClaimTimestamp to now to avoid that the new token can claim 
-        // yield accrued until now based on the entryYield and entryNAV of the "from" tokenId
-        } else {
-            // 2.2. Create positionData struct for the new tokenId with the same entryYield and entryNAV of the "from" tokenId, 
-            //    but with lastClaimTimestamp updated to now
-            PositionData memory fromPosData = s_fromIdToPositionData[_fromTokenId];
-            s_fromIdToPositionData[_toTokenId] = PositionData({
-                entryYield: fromPosData.entryYield,
-                entryNAV: fromPosData.entryNAV,
-                mintTimestamp: block.timestamp,
-                lastClaimTimestamp: block.timestamp
-            });
-        }
+        // 2. Initialize PositionData for the new token with current slot yield and PAR NAV.
+        //    For partial transfers, PositionData will be overwritten in _beforeTransfer with
+        //    the inherited values from the source token (entryYield, entryNAV, mintTimestamp).
+        s_fromIdToPositionData[_toTokenId] = PositionData({
+            entryYield: s_lastValidYieldPerSlot[_slot],
+            entryNAV: PAR,
+            mintTimestamp: block.timestamp,
+            lastClaimTimestamp: block.timestamp
+        });
 
     }
 
@@ -435,8 +411,23 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         uint256 _slot,
         uint256 _value
     ) internal {
-        (uint256 netPayout,uint256 managementFee) = _claimYield(_fromTokenId, s_fromIdToPositionData[_fromTokenId]);
-        i_treasury.transferUsdcFromYieldClaim(netPayout + managementFee, _to, _slot, managementFee);
+        // Claim yield accrued on the source token before the transfer
+        (uint256 netPayout, uint256 managementFee) = _claimYield(_fromTokenId, s_fromIdToPositionData[_fromTokenId]);
+        i_treasury.transferUsdcFromYieldClaim(netPayout + managementFee, _from, _slot, managementFee);
+
+        // Partial transfer (value-split): _beforeMint already wrote a default PositionData on _toTokenId.
+        // Overwrite it here with the source token's entryYield, entryNAV and mintTimestamp so the lock
+        // period is inherited and the yield rate is preserved. lastClaimTimestamp stays block.timestamp
+        // (set by _beforeMint) so the new token accrues yield only from the transfer moment forward.
+        if (_fromTokenId != _toTokenId) {
+            PositionData memory fromPosData = s_fromIdToPositionData[_fromTokenId];
+            s_fromIdToPositionData[_toTokenId] = PositionData({
+                entryYield:          fromPosData.entryYield,
+                entryNAV:            fromPosData.entryNAV,
+                mintTimestamp:       fromPosData.mintTimestamp,
+                lastClaimTimestamp:  block.timestamp
+            });
+        }
         // se si vuole implementare la funzione di transfer forzato dal protocol owner, è necessario aggiornare l' accounting del tot value per slot anche durante i transfer
     }
 
@@ -495,7 +486,6 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         uint256 currentFeePercentage = (PERCENTAGE_EXIT_FEE_MAX * remainingTime) / penaltyPeriod;
 
         feeAmount =(_usdValue * currentFeePercentage) / C.MAX_PERCENTAGE;
-        return feeAmount;
     }
 
     /**

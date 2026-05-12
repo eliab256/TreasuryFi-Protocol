@@ -10,12 +10,12 @@ struct BondYieldsResponse {
 }
 
 struct ReservesResponse {
-    // Bond buckets — mark-to-market of bond for each slot (8 decimals)
+    // Bond buckets mark-to-market of bond for each slot (8 decimals)
     uint256 twoYearUsdBondsValue;
     uint256 fiveYearUsdBondsValue;
     uint256 tenYearUsdBondsValue;
     uint256 thirtyYearUsdBondsValue;
-    // Cash buckets — available liquidity per slot (8 decimals)
+    // Cash buckets mark-to-market of cash for each slot (8 decimals)
     uint256 twoYearUsdCashValue;
     uint256 fiveYearUsdCashValue;
     uint256 tenYearUsdCashValue;
@@ -24,24 +24,29 @@ struct ReservesResponse {
     uint256 cashBufferUsdTotalValue;  // sum of the 4 cash buckets (8 decimals)
     uint256 totalUsdBondsValue;       // sum of the 4 bond buckets only (8 decimals)
     uint256 totalUsdPortfolioValue;   // totalUsdBondsValue + cashBufferUsdTotalValue (8 decimals)
+    // Timestamp of the last update, used to determine data staleness
     uint256 timestamp;
 }
 
 /**
  * @notice Stores position-specific data for each tokenId, captured at mint time.
  *
- * @param entryYield     The Treasury yield for this slot at mint time, in basis points x 100 (e.g. 45000 = 4.50%).
- *                       Used as y_entry in the NAV formula: NAV = par × [1 - D_mod × (y_current - y_entry)].
- *                       Sourced from BondOracle at mint time.
+ * @param entryYield         The Treasury yield for this slot at mint time, in basis points x 100 (e.g. 45000 = 4.50%).
+ *                           Used as y_entry in the NAV formula: NAV = par × [1 - D_mod × (y_current - y_entry)].
+ *                           Sourced from BondOracle at mint time.
  *
- * @param entryNAV       The NAV per unit at mint time, used to calculate how many units the user received
- *                       for their USDC deposit: valueToMint = (usdcNet * PAR) / entryNAV.
- *                       Stored to allow exact payout reconstruction and audit trail.
+ * @param entryNAV           The NAV per unit at mint time, used to calculate how many units the user received
+ *                           for their USDC deposit: valueToMint = (usdcNet * PAR) / entryNAV.
+ *                           Stored to allow exact payout reconstruction and audit trail.
  *
- * @param mintTimestamp  The UNIX timestamp when the position was opened.
- *                       Used to:
- *                       - enforce the slot lock period (mint + lockPeriod > block.timestamp → early redeem fee)
- *                       - calculate elapsed time for yield accrual in claimYield()
+ * @param mintTimestamp      The UNIX timestamp when the position was opened.
+ *                           Used to:
+ *                           - enforce the slot lock period (mint + lockPeriod > block.timestamp → early redeem fee)
+ *                           - calculate elapsed time for yield accrual in claimYield()
+ *
+ * @param lastClaimTimestamp The UNIX timestamp of the last yield claim, used to calculate claimable yield since last claim.
+ *                           Used to ensure that yield is only claimable once per claim period and to calculate the correct
+ *                           amount of yield to transfer to the user on each claim.
  */
 struct PositionData {
     uint256 entryYield;      // basis points x 100, e.g. 45000 = 4.50%

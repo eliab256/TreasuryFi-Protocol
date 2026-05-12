@@ -72,27 +72,36 @@ TreasuryBondToken._beforeValueTransfer()
 
 ## 3. Dati necessari
 
-Per implementare le funzioni V1, il RiskManager ha bisogno di accedere a:
+Il RiskManager non legge mai gli oracle direttamente nelle transazioni utente. Lavora su una **cache interna validata** (`s_lastValidYields`, `s_lastValidReserves`) che viene aggiornata da Chainlink Automation.
 
-### Dal BondOracle
-| Dato | Perché serve | Come ottenerlo |
-|---|---|---|
-| `yield attuale per slot` | shock filter, bounds check | `i_bondOracle.getYield(slot)` |
-| `isStale()` | freshness check | `i_bondOracle.isStale()` |
+### Flusso dati
+```
+Chainlink Automation
+    └── BondAutomation.performUpkeep()
+            └── BondFunctionsConsumer → Chainlink Functions → BondOracle
+                    └── TreasuryBondToken._updateYieldsValues()
+                            ├── shock detection per slot
+                            ├── aggiornamento s_lastValidYields (cache)
+                            └── freeze slot anomali
 
-### Dal ReservesOracle
-| Dato | Perché serve | Come ottenerlo |
-|---|---|---|
-| `USD value per slot` | reserve coverage check | `i_reservesOracle.getUsdValue(slot)` |
-| `total USD value` | solvency check globale | `i_reservesOracle.getTotalUsdValue()` |
-| `isStale()` | freshness check | `i_reservesOracle.isStale()` |
+Chainlink Automation
+    └── ReservesAutomation.performUpkeep()
+            └── ReservesFunctionsConsumer → Chainlink Functions → ReservesOracle
+                    └── TreasuryBondToken._updateReservesValues()
+                            ├── shock detection per slot (bond value + cash buffer)
+                            ├── aggiornamento s_lastValidReserves (cache)
+                            └── freeze slot anomali
+```
 
-### Da TreasuryBondToken (via dipendenza astratta)
-| Dato | Perché serve | Come ottenerlo |
+### Per transazione utente (mint/burn/claimYield)
+| Dato | Quando | Come |
 |---|---|---|
-| `valore del token` | frozen value check, redeem validation | `balanceOf(tokenId)` — dichiarata virtual |
-| `liabilities per slot` | reserve coverage | `s_totalValuePerSlot[slot]` — storage condiviso |
-| `PositionData del token` | lock period check | `s_fromIdToPositionData[tokenId]` — storage condiviso |
+| `isStale()` yields | per-tx (guardia finale) | `i_yieldsOracle.isStale()` |
+| `isStale()` reserves | per-tx (guardia finale) | `i_reservesOracle.isStale()` |
+| `slot frozen` | per-tx | `s_slotState[slot].frozen` |
+| yield corrente | letto dalla cache | `s_lastValidYields` |
+| reserve corrente | letta dalla cache | `s_lastValidReserves` |
+| liabilities per slot | storage condiviso | `s_totalLiabilitiesPerSlot[slot]` |
 
 ---
 
@@ -101,396 +110,217 @@ Per implementare le funzioni V1, il RiskManager ha bisogno di accedere a:
 Il RiskManager possiede il seguente storage. Tutto `internal` per essere accessibile al figlio.
 
 ```solidity
-// ─── Parametri per slot ──────────────────────────────────────────────────────
+// ─── Immutabili oracle e automation ─────────────────────────────────────────
 
-struct SlotRiskParams {
-    uint256 maxSupply;            // valore massimo mintabile per slot (in USDC decimals)
-    uint256 lockPeriod;           // secondi di lock prima del redeem (es. 30 giorni = 30 days)
-    uint256 reserveBuffer;        // % di overcollateral richiesta (es. 110 = 110%, base 100)
-    uint256 maxDailyRedeem;       // massimo valore riscattabile in 24h per slot
-    uint256 redeemWindowOpen;     // secondi dall'inizio della settimana in cui si apre la finestra
-                                  // es. lunedì 09:00 UTC → 9 * 3600 = 32400
-    uint256 redeemWindowDuration; // durata della finestra in secondi (es. 8 ore → 28800)
-                                  // se 0, la finestra è sempre aperta (nessun vincolo temporale)
+IBondAutomation    internal immutable i_yieldsAutomation;
+IReservesAutomation internal immutable i_reservesAutomation;
+IReservesOracle    internal immutable i_reservesOracle;
+IBondOracle        internal immutable i_yieldsOracle;
+uint256            internal immutable i_gracePeriod;  // da i_yieldsAutomation
+uint256            internal immutable i_interval;     // da i_yieldsAutomation
+
+// ─── Timestamp ultimo trigger manuale ────────────────────────────────────────
+
+uint256 internal s_lastUpkeepTriggerReserves;
+uint256 internal s_lastUpkeepTriggerYields;
+
+// ─── Cache dati validati (aggiornata da automation) ───────────────────────────
+
+// Cache completa yields per tutti e 4 gli slot — consumata da _getLastValidYields()
+BondYieldsResponse internal s_lastValidYields;
+
+// Cache completa reserves per tutti e 4 gli slot — consumata da _getLastValidReserves()
+ReservesResponse   internal s_lastValidReserves;
+
+// ─── Shock filter (valori precedenti per calcolo delta) ──────────────────────
+
+// Ultimo yield accettato per slot — serve solo per il check shock durante l'aggiornamento
+mapping(uint256 => uint256) internal s_lastValidYieldPerSlot;
+
+// Ultimo valore bond USD accettato per slot — shock detection reserves
+mapping(uint256 => uint256) internal s_lastValidReservePerSlot;
+
+// Ultimo cash buffer USD accettato per slot — shock detection cash
+mapping(uint256 => uint256) internal s_lastValidCashBufferPerSlot;
+
+// ─── Slot freeze state (packed: 3 bool in 1 storage slot) ────────────────────
+
+struct SlotFreezeState {
+    bool frozenByYields;    // anomalia rilevata nel feed yields
+    bool frozenByReserves;  // anomalia rilevata nel feed reserves
+    bool frozen;            // risultante — unico campo letto nelle tx utente
 }
-mapping(uint256 => SlotRiskParams) internal s_slotRiskParams;
+mapping(uint256 => SlotFreezeState) internal s_slotState;
 
-// ─── Shock filter ────────────────────────────────────────────────────────────
+// ─── Liabilities per slot ────────────────────────────────────────────────────
 
-// ultimo yield valido registrato per slot, usato per calcolare il delta
-mapping(uint256 => uint64) internal s_lastValidYield;
-
-// ─── Rate limiting redeem ────────────────────────────────────────────────────
-
-// volume di redeem accumulato oggi per slot
-mapping(uint256 => uint256) internal s_dailyRedeemVolume;
-
-// timestamp dell'ultimo reset del contatore giornaliero per slot
-mapping(uint256 => uint256) internal s_dailyRedeemWindowStart;
-
-// ─── Slot freeze ─────────────────────────────────────────────────────────────
-
-// se true, il slot è bloccato per qualsiasi operazione (mint e redeem)
-mapping(uint256 => bool) internal s_slotFrozen;
+// Valore totale delle posizioni aperte per slot, in USDC equivalente
+// Aggiornato su mint (+value), burn (-value), yield claim
+mapping(uint256 => uint256) private s_totalLiabilitiesPerSlot;
 
 // ─── Costanti ────────────────────────────────────────────────────────────────
 
-// delta massimo accettabile tra due yield consecutivi (in basis points)
-// es. 500 = 5% — se yield passa da 4% a 9% in un update, viene rifiutato
-uint64 internal constant MAX_YIELD_DELTA = 500;
-
-// yield massimo accettabile in assoluto (in basis points)
-// es. 2000 = 20%
-uint64 internal constant MAX_YIELD = 2000;
-
-// yield minimo accettabile (deve essere > 0)
-uint64 internal constant MIN_YIELD = 1;
+uint256 internal constant MAX_YIELD_SHOCK_BPS   = 5  * PERCENTAGE_PRECISION; // 5%
+uint256 internal constant MAX_YIELD             = 20 * PERCENTAGE_PRECISION; // 20% bounds assoluto
+uint256 internal constant MAX_RESERVES_SHOCK_BPS = 30 * PERCENTAGE_PRECISION; // 30%
 ```
 
 ---
 
 ## 5. Dipendenze esterne
 
-Il RiskManager è `abstract` e non eredita `ERC3525`. Per accedere ai dati dei token dichiara dipendenze virtuali che il contratto figlio risolve:
+Il RiskManager detiene **direttamente** le reference agli oracle e ai contratti automation come immutabili. Non usa funzioni virtual astratte — gli oracle sono conosciuti al deploy e passati al costruttore.
 
 ```solidity
-// dichiarate in RiskManager, implementate da ERC3525 nel figlio
-function balanceOf(uint256 tokenId) public view virtual returns (uint256);
+constructor(
+    address _yieldsAutomation,
+    address _reservesAutomation,
+    address _reservesOracle,
+    address _yieldsOracle
+) {
+    i_yieldsAutomation   = IBondAutomation(_yieldsAutomation);
+    i_reservesAutomation = IReservesAutomation(_reservesAutomation);
+    i_reservesOracle     = IReservesOracle(_reservesOracle);
+    i_yieldsOracle       = IBondOracle(_yieldsOracle);
+    (i_interval, i_gracePeriod, ) = i_yieldsAutomation.getAllUpkeepInfo();
+}
 ```
 
-Per gli oracle, il RiskManager non li conosce direttamente — li riceve come parametro nelle funzioni di validazione oppure il figlio li passa attraverso funzioni `virtual` da fare override:
+I check di validità oracle nelle tx utente usano `i_yieldsOracle.isStale()` e `i_reservesOracle.isStale()` direttamente — nessun layer di indirection virtual.
 
-```solidity
-// il figlio implementa questi due getter che wrappano gli oracle immutabili
-function _getYieldForSlot(uint256 slot) internal view virtual returns (uint64);
-function _getReserveForSlot(uint256 slot) internal view virtual returns (uint256);
-function _getTotalReserves() internal view virtual returns (uint256);
-function _areOraclesStale() internal view virtual returns (bool yieldStale, bool reserveStale);
-```
-
-Questo pattern mantiene il RiskManager testabile in isolamento senza dover deployare gli oracle reali.
+**Nota per i test**: poiché gli oracle sono immutabili, i test unitari del RiskManager devono deployare mock degli oracle o usare Foundry `vm.mockCall` sulle interfacce.
 
 ---
 
 ## 6. Funzioni V1
 
-### 6.1 Admin — configurazione parametri slot
-
-**`_setSlotRiskParams(uint256 slot, SlotRiskParams memory params)`**
-- Imposta i parametri di rischio per uno slot specifico
-- Chiamata dal costruttore di TreasuryBondToken per ogni slot (2Y, 5Y, 10Y, 30Y)
-- Verifica che `maxSupply > 0`, `reserveBuffer >= 100`, `lockPeriod` coerente con la maturity dello slot
-- Verifica che `redeemWindowOpen < 7 days` e `redeemWindowOpen + redeemWindowDuration <= 7 days`
-- Accessibile solo con `OWNER_ROLE` quando esposta come funzione pubblica nel figlio
-
-**`_freezeSlot(uint256 slot)`** / **`_unfreezeSlot(uint256 slot)`**
-- Blocca/sblocca tutte le operazioni su uno slot specifico
-- Da chiamare manualmente dall'admin in caso di anomalia rilevata
-- Emette evento `SlotFrozen(slot)` / `SlotUnfrozen(slot)`
-- Non sostituisce il pause globale di ERC3643 — quello blocca tutto, questo blocca un singolo slot
-
----
-
-### 6.2 Oracle Validation
-
-**`_validateOracleData(uint256 slot)`**
-
-Scopo: garantire che i dati oracle siano freschi e nel range accettabile prima di qualsiasi operazione.
-
-Logica:
-1. Chiama `_areOraclesStale()` → se uno dei due oracle è stale, revert
-2. Legge yield corrente via `_getYieldForSlot(slot)`
-3. Verifica `yield >= MIN_YIELD` e `yield <= MAX_YIELD`
-4. Se i bound non sono rispettati → revert `RiskManager__YieldOutOfBounds`
-
-Chiamata in: `_beforeMint`, `_beforeBurn`
-
----
-
-**`_validateYieldShock(uint256 slot)`**
-
-Scopo: proteggere il protocollo da errori oracle che producono valori anomali rispetto all'ultimo dato valido.
-
-Logica:
-1. Legge `prevYield = s_lastValidYield[slot]`
-2. Se `prevYield == 0` (primo aggiornamento) → skip check, salva il valore corrente e return
-3. Calcola `delta = |currentYield - prevYield|`
-4. Se `delta > MAX_YIELD_DELTA` → revert `RiskManager__YieldShockDetected`
-5. Aggiorna `s_lastValidYield[slot] = currentYield`
-
-Nota importante: questa funzione ha side effect (aggiorna storage) quindi non è `view`. Va chiamata con attenzione nel flusso — solo quando si è certi che l'operazione andrà a buon fine (dopo tutti i check view). Valutare se aggiornarla in `_afterValueTransfer` invece che in `_before`.
-
-Chiamata in: `_beforeMint` (dopo `_validateOracleData`)
-
----
-
-### 6.3 Reserve Coverage
-
-**`_validateMintReserves(uint256 slot, uint256 mintValue)`**
-
-Scopo: garantire che le riserve disponibili per lo slot coprano le liability esistenti più il nuovo mint.
-
-Logica:
-1. Legge `reserves = _getReserveForSlot(slot)`
-2. Legge `liabilities = s_totalValuePerSlot[slot]` (storage condiviso con TreasuryBondToken)
-3. Legge `buffer = s_slotRiskParams[slot].reserveBuffer`
-4. Calcola `requiredReserves = (liabilities + mintValue) * buffer / 100`
-5. Se `reserves < requiredReserves` → revert `RiskManager__InsufficientReserves`
-
-Nota sul buffer: con `reserveBuffer = 110`, il protocollo richiede il 110% di copertura. Se le liability sono 1000 USDC e si vuole mintare per altri 100, servono almeno 1210 USDC in riserva.
-
-Chiamata in: `_beforeMint`
-
----
-
-**`_validateRedeemLiquidity(uint256 slot, uint256 payout)`**
-
-Scopo: garantire che ci sia liquidità sufficiente per pagare il redeem corrente.
-
-Logica:
-1. Legge `availableLiquidity = _getReserveForSlot(slot)`
-2. Se `availableLiquidity < payout` → revert `RiskManager__InsufficientLiquidity`
-
-Nota: `payout` è il valore in USDC che il protocollo deve trasferire all'utente, già calcolato (al netto delle fee) prima di chiamare questa funzione.
-
-Chiamata in: `_beforeBurn`
-
----
-
-### 6.4 Slot Controls
-
-**`_validateSlotNotFrozen(uint256 slot)`**
-
-Scopo: bloccare qualsiasi operazione su uno slot marcato come frozen.
-
-Logica:
-1. Se `s_slotFrozen[slot] == true` → revert `RiskManager__SlotFrozen`
-
-Chiamata in: `_beforeMint`, `_beforeBurn`, `_beforeTransfer`
-
----
-
-**`_validateSlotCap(uint256 slot, uint256 mintValue)`**
-
-Scopo: impedire che il valore totale mintato per uno slot superi il cap configurato.
-
-Logica:
-1. Legge `cap = s_slotRiskParams[slot].maxSupply`
-2. Legge `current = s_totalValuePerSlot[slot]`
-3. Se `current + mintValue > cap` → revert `RiskManager__SlotCapExceeded`
-
-Chiamata in: `_beforeMint`
-
----
-
-### 6.5 Lock Period e Redeem
-
-**`_validateLockPeriod(uint256 tokenId)`**
-
-Scopo: impedire il redeem prima che sia trascorso il lock period dall'apertura della posizione.
-
-Logica:
-1. Legge `positionData = s_fromIdToPositionData[tokenId]` (storage condiviso)
-2. Legge `lockPeriod = s_slotRiskParams[slotOf(tokenId)].lockPeriod`
-3. Calcola `unlockTime = positionData.positionMintTimestamp + lockPeriod`
-4. Se `block.timestamp < unlockTime` → revert `RiskManager__PositionStillLocked` con `unlockTime`
-
-Chiamata in: `_beforeBurn`
-
----
-
-**`_validateRedeemRateLimit(uint256 slot, uint256 redeemValue)`**
-
-Scopo: proteggere il protocollo da bank run limitando il volume di redeem giornaliero per slot.
-
-Logica:
-1. Se `block.timestamp > s_dailyRedeemWindowStart[slot] + 1 days`:
-   - reset `s_dailyRedeemVolume[slot] = 0`
-   - aggiorna `s_dailyRedeemWindowStart[slot] = block.timestamp`
-2. Legge `maxDaily = s_slotRiskParams[slot].maxDailyRedeem`
-3. Se `s_dailyRedeemVolume[slot] + redeemValue > maxDaily` → revert `RiskManager__DailyRedeemLimitExceeded`
-4. Incrementa `s_dailyRedeemVolume[slot] += redeemValue`
-
-Nota: come `_validateYieldShock`, questa funzione ha side effect. Va chiamata solo quando si è certi che il burn andrà a buon fine.
-
-Chiamata in: `_beforeBurn`
-
----
-
-### 6.6 Redemption Window
-
-#### Perché serve questa feature
-
-Il protocollo ha un problema strutturale di **liquidità asincrona**: le liability sono on-chain ed esigibili in qualsiasi momento, mentre gli asset sono off-chain e illiquidi.
-
-Quando un utente chiama `closePosition`, il protocollo deve pagare in USDC. Quella liquidità proviene dal cash buffer del Treasury, che viene rifornito dallo SPV periodicamente — non in tempo reale. Lo SPV deve liquidare T-Bill off-chain, operazione che richiede ore o giorni lavorativi a seconda del mercato.
-
-Senza finestre di redemption, un utente potrebbe riscattare alle 03:00 UTC di domenica quando lo SPV non ha operatori disponibili per rifornire il Treasury. Il contratto fallirebbe per mancanza di liquidità, anche se gli asset dello SPV coprono abbondantemente le liability.
-
-La redemption window risolve questo disallineamento sincronizzando le richieste di rimborso con gli orari operativi dello SPV — esattamente come fanno i fondi comuni di investimento in TradFi, che accettano ordini di rimborso solo in determinate finestre e li eseguono alla NAV del giorno successivo.
-
-Questa feature si distingue dal `maxDailyRedeem` per scopo e funzionamento:
-
-| | `maxDailyRedeem` | `redeemWindow` |
-|---|---|---|
-| Cosa limita | Volume totale riscattabile | Quando si può riscattare |
-| Scopo | Anti bank-run | Sincronizzazione con SPV |
-| Natura | Quantitativa | Temporale |
-| Si resetta | Ogni 24h | Ogni settimana |
-
-Entrambi devono passare per autorizzare un rimborso — sono controlli ortogonali.
-
-#### Calibrazione per slot
-
-La finestra va calibrata sulla liquidità dei T-Bill sottostanti. Slot con duration maggiore hanno T-Bill meno liquidi sul mercato secondario e richiedono più tempo allo SPV per liquidarli, quindi la finestra deve essere più restrittiva:
-
-| Slot | Liquidità T-Bill | Finestra consigliata | Motivazione |
-|---|---|---|---|
-| 2Y | Alta | Giornaliera, 8h | T-Bill brevi molto liquidi, SPV può liquidare rapidamente |
-| 5Y | Media | Settimanale, 8h | Liquidità buona ma non immediata |
-| 10Y | Media-bassa | Settimanale, 4h | Mercato secondario meno profondo |
-| 30Y | Bassa | Bisettimanale, 4h | T-Bill lunghi illiquidi, SPV ha bisogno di più tempo |
-
-Questi parametri sono tutti configurabili tramite `_setSlotRiskParams` — la logica del contratto non dipende da valori hardcoded.
-
-#### Implementazione
-
-I due nuovi campi in `SlotRiskParams`:
-
-```solidity
-uint256 redeemWindowOpen;     // secondi dall'inizio della settimana (0 = lunedì 00:00 UTC)
-                              // es. lunedì 09:00 UTC → 9 * 3600 = 32400
-uint256 redeemWindowDuration; // durata in secondi
-                              // es. 8 ore → 28800
-                              // se 0 → finestra sempre aperta, nessun vincolo temporale
+> **Stato implementazione**: le sezioni 6.1–6.3 sono completamente implementate. Le sezioni 6.4–6.8 sono stub nel contratto (commenti presenti, logica da completare).
+
+### 6.1 Cache update — yields
+
+**`_updateYieldsValues()`** (internal)
+
+Point of entry chiamato dall'automation o manualmente. Coordina update e freeze:
+
+```
+_updateYieldsValues()
+    └── _updateLastValidYields()
+            ├── Controlla se il timestamp oracle è più recente di s_lastValidYields.timestamp
+            │       └── Se no → return (false, false, false, false)  [nessuna azione]
+            ├── Legge BondYieldsResponse da i_yieldsOracle.getAllYields()
+            ├── _validateAndUpdateLastValidYield() per ogni slot
+            │       ├── bounds check (0 < yield ≤ MAX_YIELD)
+            │       ├── shock check (delta con s_lastValidYieldPerSlot[slot] ≤ MAX_YIELD_SHOCK_BPS)
+            │       └── se ok: aggiorna s_lastValidYieldPerSlot[slot], return false
+            │           se anomalia: emit evento, return true (freezeSlot)
+            ├── Se tutti ok → s_lastValidYields = newResponse (aggiornamento atomico)
+            └── Se almeno uno anomalo → mixed response:
+                    ├── slot sani ricevono il nuovo valore
+                    ├── slot frozen mantengono il vecchio valore
+                    └── timestamp = cached.timestamp (non si marca come fresco)
+    └── _setYieldsSlotFrozen() per ogni slot (aggiorna SlotFreezeState)
 ```
 
-La funzione di validazione:
+**`_triggerYieldsUpkeep()`** (internal)
+
+Permette all'admin del contratto figlio di forzare manualmente un ciclo di automation, con protezione da spam tramite `i_interval + i_gracePeriod`:
+
+1. Se `block.timestamp <= s_lastUpkeepTriggerYields + i_interval + i_gracePeriod` → revert `AutomationGracePeriodNotElapsed`
+2. Chiama `i_yieldsAutomation.checkUpkeep("")` — se upkeep non necessario, non esegue
+3. Se necessario: `i_yieldsAutomation.performUpkeep("")` + aggiorna `s_lastUpkeepTriggerYields`
+
+---
+
+### 6.2 Cache update — reserves
+
+**`_updateReservesValues()`** (internal)
+
+Stesso pattern di `_updateYieldsValues`. Valida due metriche per slot:
+- bond USD value (`_validateAndUpdateLastValidReserve`)
+- cash buffer USD value (`_validateAndUpdateLastValidCashBuffer`): solo se il bond value era valido
+
+Logica mixed response:
+- `cashBufferUsdTotalValue`: se **almeno uno** slot è frozen, tieni il valore cached
+- `totalUsdBondsValue` / `totalUsdPortfolioValue`: solo se **tutti** gli slot sono frozen, tieni cached; altrimenti usa il valore dell'oracle (già ricalcolato off-chain)
+
+**`_triggerReservesUpkeep()`** (internal) — stesso pattern di `_triggerYieldsUpkeep`.
+
+---
+
+### 6.3 Slot freeze management
+
+**`_setSlotFrozenOnMainContract(uint256 _slot, bool _frozen)`** (internal)
+
+Permette all'admin del contratto figlio di forzare manualmente il freeze/unfreeze di uno slot.
+- Legge `s_slotState[_slot]` (1 SLOAD, ottiene tutti e 3 i bool)
+- Se già nello stato richiesto → revert `SlotAlreadyInState`
+- Imposta entrambi `frozenByYields` e `frozenByReserves` al valore richiesto
+- Aggiorna `frozen` ed emette `SlotFrozen` / `SlotUnfrozen`
+
+**`_getLastValidYields(uint256 _slot)`** (internal view)
+
+Getter sicuro per i consumer interni (TreasuryBondToken):
+1. `isStale()` yields → revert se stale
+2. `s_slotState[_slot].frozen` → revert se frozen
+3. Return `s_lastValidYields`
+
+**`_getLastValidReserves(uint256 _slot)`** (internal view) — stesso pattern per reserves.
+
+---
+
+### 6.4 Lifecycle hooks (parzialmente implementati)
+
+I tre lifecycle hook sono presenti e chiamati dal contratto figlio. Ogni hook:
+- ✅ Controlla `isStale()` su entrambi gli oracle (guardia residuale)
+- ✅ Controlla `s_slotState[_slot].frozen`
+- ✅ Legge `s_lastValidYields` / `s_lastValidReserves` dalla cache
+- ✅ Aggiorna `s_totalLiabilitiesPerSlot` (mint: +value, burn: -value)
+- ⚠️ Check reserve coverage e liquidity: **stub** — la logica è segnata con commento ma non implementata
 
 ```solidity
-/**
- * @notice Verifica che il redeem avvenga durante la finestra operativa configurata per lo slot.
- * @dev Usa block.timestamp % 7 days per ricavare la posizione nell'arco settimanale.
- *      Se redeemWindowDuration == 0, la finestra è sempre aperta (default sicuro per testnet).
- * @param _slot Lo slot da validare.
- */
-function _validateRedemptionWindow(uint256 _slot) internal view {
-    SlotRiskParams memory params = s_slotRiskParams[_slot];
-
-    // finestra non configurata → sempre aperta
-    if (params.redeemWindowDuration == 0) return;
-
-    uint256 secondsIntoWeek = block.timestamp % 7 days;
-    uint256 windowStart     = params.redeemWindowOpen;
-    uint256 windowEnd       = windowStart + params.redeemWindowDuration;
-
-    if (secondsIntoWeek < windowStart || secondsIntoWeek > windowEnd) {
-        revert RiskManager__RedemptionWindowClosed(
-            _slot,
-            windowStart,
-            windowEnd,
-            secondsIntoWeek
-        );
-    }
-}
-```
-
-Validazione dei parametri in `_setSlotRiskParams`:
-
-```solidity
-// redeemWindowOpen deve essere dentro la settimana
-if (params.redeemWindowOpen >= 7 days) revert RiskManager__InvalidSlotParams();
-
-// la finestra non può sconfinare nella settimana successiva
-if (params.redeemWindowOpen + params.redeemWindowDuration > 7 days)
-    revert RiskManager__InvalidSlotParams();
-```
-
-#### Dove viene chiamata
-
-In `_beforeBurn`, come primo controllo temporale — prima di `_validateLockPeriod` e `_validateRedeemRateLimit`, in modo che l'utente riceva subito il feedback corretto sul timing senza consumare gas per i check successivi:
-
-```solidity
-function _beforeBurn(address _from, uint256 _fromTokenId, uint256 _slot, uint256 _value) internal {
-    _validateSlotNotFrozen(_slot);          // blocco totale slot
-    _validateOracleData(_slot);             // freshness e bounds oracle
-    _validateRedemptionWindow(_slot);       // finestra operativa SPV  ← qui
-    _validateLockPeriod(_fromTokenId);      // lock period per token
-    _validateRedeemLiquidity(_slot, payout); // liquidità cash buffer
-    _validateRedeemRateLimit(_slot, _value); // volume giornaliero (side effect)
-}
-```
-
-`_validateRedemptionWindow` è `view` — nessun side effect, sicura in qualsiasi posizione del flusso.
-
-#### Getter pubblico consigliato
-
-Per consentire ai frontend di mostrare quando si può riscattare senza simulare la transazione:
-
-```solidity
-/**
- * @notice Restituisce il timestamp UTC in cui si aprirà la prossima finestra di redemption per lo slot.
- * @param _slot Lo slot da interrogare.
- * @return nextWindowOpen Timestamp UNIX della prossima apertura.
- * @return windowDuration Durata della finestra in secondi.
- */
-function getNextRedemptionWindow(uint256 _slot)
-    external view
-    returns (uint256 nextWindowOpen, uint256 windowDuration)
-{
-    SlotRiskParams memory params = s_slotRiskParams[_slot];
-    windowDuration = params.redeemWindowDuration;
-
-    if (windowDuration == 0) {
-        return (block.timestamp, 0); // sempre aperta
-    }
-
-    uint256 secondsIntoWeek  = block.timestamp % 7 days;
-    uint256 weekStart        = block.timestamp - secondsIntoWeek;
-
-    if (secondsIntoWeek <= params.redeemWindowOpen) {
-        // la finestra di questa settimana non è ancora iniziata
-        nextWindowOpen = weekStart + params.redeemWindowOpen;
-    } else {
-        // la finestra di questa settimana è già passata → prossima settimana
-        nextWindowOpen = weekStart + 7 days + params.redeemWindowOpen;
-    }
-}
+function _riskManagerBeforeMint(uint256 _slot, uint256 _value) internal
+function _riskManagerBeforeBurn(uint256 _slot, uint256 _value) internal
+function _riskManagerBeforeClaimingYield(uint256 _slot, uint256 _value) internal
 ```
 
 ---
 
-### 6.7 Fee Sanity (statica)
+### 6.5 Reserve coverage (stub da completare)
 
-**`_validateFeeConfiguration(uint256 fee, uint256 slot)`**
+**`_validateMintReserves(uint256 _slot, uint256 _mintValue)`**
 
-Scopo: verificare al momento della configurazione che le fee siano matematicamente sensate.
+Da implementare dentro `_riskManagerBeforeMint` (step 4, attualmente vuoto).
 
-Logica:
-1. Se `fee >= PERCENTAGE_PRECISION` (>= 100%) → revert `RiskManager__FeeExceedsMax`
-2. Legge `expectedMinYield = MIN_YIELD * 100` (conversione basis points → stessa scala delle fee)
-3. Se `fee > expectedMinYield` → revert `RiskManager__FeeExceedsExpectedYield`
+Logica prevista:
+1. Legge `reserves = s_lastValidReserves` dalla cache (già caricata nel hook)
+2. Legge `liabilities = s_totalLiabilitiesPerSlot[_slot]`
+3. Confronta `reserves.slotUsdBondsValue[slot]` con `liabilities + _mintValue` applicando un buffer configurabile
+4. Se insufficiente → revert `RiskManager__InsufficientReserves`
 
-Chiamata in: setter delle fee in TreasuryBondToken, non nel flusso di ogni operazione.
+**`_validateRedeemLiquidity(uint256 _slot, uint256 _payout)`**
+
+Da implementare dentro `_riskManagerBeforeBurn` (step 4, attualmente vuoto).
+
+`_payout` è il valore USDC al netto delle fee, già calcolato da TreasuryBondToken prima di chiamare il hook.
 
 ---
 
-### 6.8 Yield Curve Detection (solo detection, no blocking)
+### 6.6 Lock period, redemption window, rate limiting (stub da completare)
 
-**`_detectCurveInversion()`** → `returns (bool isInverted)`
+Vedi spec originale sezioni 6.5 e 6.6. Nessuna di queste feature è presente nel contratto corrente.
+Da implementare come funzioni private richiamate dai lifecycle hook.
 
-Scopo: rilevare se la curva dei rendimenti è invertita (2Y > 10Y), condizione che segnala un cambio di regime di rischio.
+---
 
-Logica:
-1. Legge `yield2Y = _getYieldForSlot(SLOT_2Y)`
-2. Legge `yield10Y = _getYieldForSlot(SLOT_10Y)`
-3. Return `yield2Y > yield10Y`
+### 6.7 Fee Sanity (stub da completare)
 
-Nota: questa funzione è `view` e non blocca nulla. Va usata per:
-- Emettere un evento `CurveInversionDetected()` in `_afterValueTransfer` o su chiamata admin
-- Consentire agli admin di decidere se congelare manualmente gli slot con duration alta
+Vedi spec originale sezione 6.7.
 
-Non implementare blocco automatico in V1 — richiede governance parametri che non sono ancora definiti.
+---
+
+### 6.8 Yield Curve Detection (stub da completare)
+
+Vedi spec originale sezione 6.8.
 
 ---
 
@@ -501,66 +331,40 @@ Non implementare blocco automatico in V1 — richiede governance parametri che n
 ```solidity
 // TreasuryBondToken._beforeMint()
 function _beforeMint(address _to, uint256 _toTokenId, uint256 _slot, uint256 _value) internal {
-    _validateSlotNotFrozen(_slot);        // RiskManager
-    _validateOracleData(_slot);           // RiskManager
-    _validateYieldShock(_slot);           // RiskManager — ha side effect
-    _validateMintReserves(_slot, _value); // RiskManager
-    _validateSlotCap(_slot, _value);      // RiskManager
+    _riskManagerBeforeMint(_slot, _value);   // RiskManager: isStale + frozen + liabilities update
+    // reserve coverage check — stub da completare in RiskManager
 }
 
-// TreasuryBondToken._beforeBurn()
-function _beforeBurn(address _from, uint256 _fromTokenId, uint256 _slot, uint256 _value) internal {
-    _validateSlotNotFrozen(_slot);               // RiskManager
-    _validateOracleData(_slot);                  // RiskManager
-    _validateRedemptionWindow(_slot);            // RiskManager — view, nessun side effect
-    _validateLockPeriod(_fromTokenId);           // RiskManager
-    _validateRedeemLiquidity(_slot, payout);     // RiskManager — payout calcolato prima
-    _validateRedeemRateLimit(_slot, _value);     // RiskManager — ha side effect
+// TreasuryBondToken._closePositionValue() / closePosition()
+function _closePosition(...) internal {
+    _riskManagerBeforeBurn(_slot, _value);   // RiskManager: isStale + frozen + liabilities update
+    // liquidity check — stub da completare in RiskManager
+}
+
+// TreasuryBondToken.claimYield()
+function claimYield(...) external {
+    _riskManagerBeforeClaimingYield(_slot, yieldValue);  // RiskManager: isStale + frozen
 }
 ```
 
-### Override delle dipendenze astratte in TreasuryBondToken
+### Consumer della cache
 
 ```solidity
-function _getYieldForSlot(uint256 slot) internal view override returns (uint64) {
-    return i_bondOracle.getYield(slot);
-}
-
-function _getReserveForSlot(uint256 slot) internal view override returns (uint256) {
-    return i_reservesOracle.getUsdValue(slot);
-}
-
-function _getTotalReserves() internal view override returns (uint256) {
-    return i_reservesOracle.getTotalUsdValue();
-}
-
-function _areOraclesStale() internal view override returns (bool yieldStale, bool reserveStale) {
-    yieldStale = i_bondOracle.isStale();
-    reserveStale = i_reservesOracle.isStale();
-}
+// TreasuryBondToken usa la cache per leggere yield e reserves
+BondYieldsResponse memory yields   = _getLastValidYields(_slot);    // isStale + frozen + cache
+ReservesResponse memory reserves   = _getLastValidReserves(_slot);  // isStale + frozen + cache
 ```
 
-### Configurazione iniziale per slot nel costruttore
+### Aggiornamento cache dal contratto figlio
+
+`TreasuryBondToken` espone funzioni pubbliche (con access control) che chiamano:
 
 ```solidity
-// nel costruttore di TreasuryBondToken
-_setSlotRiskParams(C.SLOT_2Y, SlotRiskParams({
-    maxSupply:            10_000_000e6,  // 10M USDC
-    lockPeriod:           30 days,
-    reserveBuffer:        110,           // 110%
-    maxDailyRedeem:       500_000e6,     // 500k USDC/giorno
-    redeemWindowOpen:     32400,         // lunedì 09:00 UTC
-    redeemWindowDuration: 28800          // 8 ore
-}));
-
-_setSlotRiskParams(C.SLOT_30Y, SlotRiskParams({
-    maxSupply:            5_000_000e6,
-    lockPeriod:           365 days,
-    reserveBuffer:        115,
-    maxDailyRedeem:       200_000e6,
-    redeemWindowOpen:     32400,         // lunedì 09:00 UTC
-    redeemWindowDuration: 14400          // 4 ore — finestra più stretta per T-Bill illiquidi
-}));
+_updateYieldsValues();    // chiamato da TreasuryBondToken.updateYields() con OPERATOR_ROLE
+_updateReservesValues();  // chiamato da TreasuryBondToken.updateReserves() con OPERATOR_ROLE
+_triggerYieldsUpkeep();   // chiamato da TreasuryBondToken.triggerYieldsUpkeep() con OWNER_ROLE
+_triggerReservesUpkeep(); // chiamato da TreasuryBondToken.triggerReservesUpkeep() con OWNER_ROLE
+_setSlotFrozenOnMainContract(_slot, _frozen); // con OWNER_ROLE
 ```
 
 ---
@@ -568,29 +372,38 @@ _setSlotRiskParams(C.SLOT_30Y, SlotRiskParams({
 ## 8. Custom Errors
 
 ```solidity
+// Implementati
+error RiskManager__InvalidYield(uint256 slot, uint256 yield);
+error RiskManager__ExcessiveYieldShock(uint256 slot, uint256 shock);
+error RiskManager__ZeroAddress();
+error RiskManager__AutomationGracePeriodNotElapsed();
+error RiskManager__SlotAlreadyFrozen(uint256 slot);
+error RiskManager__SlotNotFrozen(uint256 slot);
 error RiskManager__SlotFrozen(uint256 slot);
-error RiskManager__OracleStale(string oracleName);
-error RiskManager__YieldOutOfBounds(uint256 slot, uint64 yield);
-error RiskManager__YieldShockDetected(uint256 slot, uint64 prev, uint64 current, uint64 delta);
+error RiskManager__SlotAlreadyInState(uint256 slot, bool frozen);
+error RiskManager__StaleOracleData();
+error RiskManager__InvalidReserve(uint256 slot, uint256 reserve);
+
+// Da aggiungere con i stub da completare
 error RiskManager__InsufficientReserves(uint256 slot, uint256 available, uint256 required);
 error RiskManager__InsufficientLiquidity(uint256 slot, uint256 available, uint256 required);
-error RiskManager__SlotCapExceeded(uint256 slot, uint256 current, uint256 cap);
 error RiskManager__PositionStillLocked(uint256 tokenId, uint256 unlockTime);
 error RiskManager__DailyRedeemLimitExceeded(uint256 slot, uint256 attempted, uint256 remaining);
 error RiskManager__RedemptionWindowClosed(uint256 slot, uint256 windowStart, uint256 windowEnd, uint256 currentSecondInWeek);
-error RiskManager__FeeExceedsMax();
-error RiskManager__FeeExceedsExpectedYield();
-error RiskManager__InvalidSlotParams();
+error RiskManager__SlotCapExceeded(uint256 slot, uint256 current, uint256 cap);
 ```
 
-### Eventi
+### Eventi implementati
 
 ```solidity
-event SlotFrozen(uint256 indexed slot, address indexed triggeredBy);
-event SlotUnfrozen(uint256 indexed slot, address indexed triggeredBy);
-event SlotRiskParamsUpdated(uint256 indexed slot, SlotRiskParams params);
-event CurveInversionDetected(uint64 yield2Y, uint64 yield10Y, uint256 timestamp);
-event YieldShockPrevented(uint256 indexed slot, uint64 prevYield, uint64 attemptedYield);
+event SlotFrozen(uint256 indexed slot);
+event SlotUnfrozen(uint256 indexed slot);
+event InvalidYield(uint256 indexed slot, uint256 yield);
+event ExcessiveYieldShock(uint256 indexed slot, uint256 shock);
+event InvalidReserve(uint256 indexed slot, uint256 reserve);
+event ExcessiveReserveShock(uint256 indexed slot, uint256 shock);
+event InvalidCashBuffer(uint256 indexed slot, uint256 cashBuffer);
+event ExcessiveCashBufferShock(uint256 indexed slot, uint256 shock);
 ```
 
 ---
@@ -598,6 +411,14 @@ event YieldShockPrevented(uint256 indexed slot, uint64 prevYield, uint64 attempt
 ## 9. Funzioni V2
 
 Queste funzioni non vanno implementate in V1 ma il contratto deve essere progettato per accoglierle senza refactoring strutturale.
+
+> **Da completare in V1 prima** (stub presenti nel contratto):
+> - Reserve coverage check in `_riskManagerBeforeMint`
+> - Liquidity check in `_riskManagerBeforeBurn`
+> - Lock period validation
+> - Redemption window
+> - Daily redeem rate limiting
+> - Slot cap (`maxSupply`)
 
 ### 9.1 Curve Blocking automatico
 

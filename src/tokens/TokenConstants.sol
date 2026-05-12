@@ -41,8 +41,6 @@ library TokenConstants {
     uint256 internal constant PERCENTAGE_PRECISION = 10000;
     uint256 internal constant MAX_PERCENTAGE = 100 * PERCENTAGE_PRECISION; // 100% in percentage precision
 
-
-
     /**
      * @dev The maximum delay for USDC price feed updates, in seconds.
      * @dev USDC pricefeed can be updated less frequently than the assets in the index, so we allow a longer delay for it.
