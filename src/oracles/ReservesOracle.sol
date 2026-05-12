@@ -26,9 +26,7 @@ contract ReservesOracle is IReservesOracle, ERC165, AccessControl {
         s_signer = signer;
     }
 
-    // ----------------------------
-    // CORE UPDATE FUNCTION
-    // ----------------------------
+    /// @dev Inherited from IReservesOracle. See interface for details.
     function updateUsdValues(
         uint256[4] memory bond,
         uint256[4] memory cash,
@@ -82,19 +80,19 @@ contract ReservesOracle is IReservesOracle, ERC165, AccessControl {
         );
     }
 
-    // ----------------------------
-    // READ FUNCTIONS
-    // ----------------------------
+    /// @dev Inherited from IReservesOracle. See interface for details.
     function getAllReserves() external view returns (ReservesResponse memory) {
         if (_isStale()) revert ReservesOracle__DataIsStale();
         return s_state;
     }
 
+    /// @dev Inherited from IReservesOracle. See interface for details.
     function getTotalUsdValue() external view returns (uint256) {
         if (_isStale()) revert ReservesOracle__DataIsStale();
         return s_state.totalUsdPortfolioValue;
     }
 
+    /// @dev Inherited from IReservesOracle. See interface for details.
     function isStale() external view returns (bool) {
         return _isStale();
     }
@@ -104,8 +102,14 @@ contract ReservesOracle is IReservesOracle, ERC165, AccessControl {
         return block.timestamp - s_state.timestamp > STALENESS_THRESHOLD;
     }
 
+    /// @dev Inherited from IReservesOracle. See interface for details.
     function getLastUpdatedTimestamp() public view returns (uint256) {
         return s_state.timestamp;
+    }
+
+    /// @dev Inherited from IReservesOracle. See interface for details.
+    function getSigner() external view returns (address) {
+        return s_signer;
     }
 
     function supportsInterface(

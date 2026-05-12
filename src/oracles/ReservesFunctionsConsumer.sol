@@ -8,8 +8,7 @@ import {IReservesOracle} from "../interfaces/IReservesOracle.sol";
 import {IReservesFunctionsConsumer} from "../interfaces/IReservesFunctionsConsumer.sol";
 
 contract ReservesFunctionsConsumer is IReservesFunctionsConsumer, FunctionsClient, AccessControl {
-    error ReservesFunctionsConsumer__SubscriptionIdAlreadySet();
-    error ReservesFunctionsConsumer__InvalidArrayLength();
+
     
     using FunctionsRequest for FunctionsRequest.Request;
 
@@ -63,6 +62,7 @@ contract ReservesFunctionsConsumer is IReservesFunctionsConsumer, FunctionsClien
         "];"
         "return Functions.encodeAbi(['uint256[4]','uint256[4]','uint256','bytes'],[bond,cash,d.timestamp,sig]);";
 
+    /// @dev Inherited from IReservesFunctionsConsumer. See interface for details.
     function setSubscriptionId(uint64 id) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (id == 0) revert ReservesFunctionsConsumer__InvalidSubscriptionId();
         if (s_subscriptionId != 0) revert ReservesFunctionsConsumer__SubscriptionIdAlreadySet();
@@ -70,6 +70,7 @@ contract ReservesFunctionsConsumer is IReservesFunctionsConsumer, FunctionsClien
         emit SubscriptionIdSet(id);
     }
 
+    /// @dev Inherited from IReservesFunctionsConsumer. See interface for details.
     function sendRequest() external onlyRole(UPDATER_ROLE) returns (bytes32) {
         FunctionsRequest.Request memory req;
         req.initializeRequestForInlineJavaScript(source);
@@ -121,30 +122,36 @@ contract ReservesFunctionsConsumer is IReservesFunctionsConsumer, FunctionsClien
         emit Response(requestId, timestamp, response, err);
     }
 
+    /// @dev Inherited from IReservesFunctionsConsumer. See interface for details.
     function getLastRequestId() external view returns (bytes32) {
         return s_lastRequestId;
     }
 
+    /// @dev Inherited from IReservesFunctionsConsumer. See interface for details.
     function getLastResponse() external view returns (bytes memory) {
         return s_lastResponse;
     }
-
+    /// @dev Inherited from IReservesFunctionsConsumer. See interface for details.
     function getLastError() external view returns (bytes memory) {
         return s_lastError;
     }
 
+    /// @dev Inherited from IReservesFunctionsConsumer. See interface for details.
     function getSubscriptionId() external view returns (uint64) {
         return s_subscriptionId;
     }
 
+    /// @dev Inherited from IReservesFunctionsConsumer. See interface for details.
     function getGasLimit() external view returns (uint32) {
         return i_gasLimit;
     }
 
+    /// @dev Inherited from IReservesFunctionsConsumer. See interface for details.
     function getDonID() external view returns (bytes32) {
         return i_donID;
     }
 
+    /// @dev Inherited from IReservesFunctionsConsumer. See interface for details.
     function getOracle() external view returns (address) {
         return i_oracle;
     }

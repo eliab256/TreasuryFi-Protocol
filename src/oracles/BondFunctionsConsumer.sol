@@ -27,6 +27,11 @@ contract BondFunctionsConsumer is
     bytes internal s_lastError;
     uint64 internal s_subscriptionId;
 
+    /**
+     * @notice The JavaScript source code for the Chainlink Functions request.
+     *         It fetches the latest bond yields from the FRED API for different maturities.
+     *         The yields are returned in basis points (BPS) and the timestamp of the latest observation.
+     */
     string internal constant source =
         'const series=["DGS2","DGS5","DGS10","DGS30"];'
         "const res=await Promise.all(series.map(id=>Functions.makeHttpRequest({url:`https://api.stlouisfed.org/fred/series/observations?series_id=${id}&api_key=${secrets.FRED_API_KEY}&file_type=json&limit=1`})));"
@@ -34,7 +39,7 @@ contract BondFunctionsConsumer is
         "const ts=[];"
         "for(let i=0;i<res.length;i++){"
         "const o=res[i].data.observations[0];"
-        "vals.push(Math.round(parseFloat(o.value)*10000));" // 👈 BPS SCALE
+        "vals.push(Math.round(parseFloat(o.value)*10000));"
         "ts.push(Math.floor(new Date(o.date).getTime()/1000));"
         "}"
         "const timestamp=Math.min(...ts);"
@@ -57,6 +62,7 @@ contract BondFunctionsConsumer is
         _grantRole(UPDATER_ROLE, msg.sender);
     }
 
+    /// @dev Inherited from IBondFunctionsConsumer. See interface for details.
     function setSubscriptionId(uint64 subscriptionId) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if(subscriptionId == 0) revert BondFunctionsConsumer__InvalidSubscriptionId();
         if(s_subscriptionId != 0) revert BondFunctionsConsumer__SubscriptionIdAlreadySet();
@@ -64,6 +70,7 @@ contract BondFunctionsConsumer is
         emit SubscriptionIdSet(subscriptionId);
     }
 
+    /// @dev Inherited from IBondFunctionsConsumer. See interface for details.
     function sendRequest() external onlyRole(UPDATER_ROLE) returns (bytes32) {
         FunctionsRequest.Request memory req;
         req.initializeRequestForInlineJavaScript(source);
@@ -78,6 +85,13 @@ contract BondFunctionsConsumer is
         return s_lastRequestId;
     }
 
+    /**
+     * @notice Internal function that fulfills the Chainlink Functions request. It validates the request ID, stores the response and error, 
+     *         and updates the Bond Oracle with the new yields if the response is valid.
+     * @param requestId The ID of the Chainlink Functions request being fulfilled.
+     * @param response The response data from the Chainlink Functions request.
+     * @param err The error data from the Chainlink Functions request, if any.
+     */
     function _fulfillRequest(
         bytes32 requestId,
         bytes memory response,
@@ -105,29 +119,37 @@ contract BondFunctionsConsumer is
         emit Response(requestId, timestamp, response, err);
     }
 
+    /// @dev Inherited from IBondFunctionsConsumer. See interface for details.
     function getLastRequestId() external view returns (bytes32) {
         return s_lastRequestId;
     }
 
+    /// @dev Inherited from IBondFunctionsConsumer. See interface for details.
     function getLastResponse() external view returns (bytes memory) {
         return s_lastResponse;
     }
 
+    /// @dev Inherited from IBondFunctionsConsumer. See interface for details.
     function getLastError() external view returns (bytes memory) {
         return s_lastError;
     }
 
+    /// @dev Inherited from IBondFunctionsConsumer. See interface for details.  
     function getSubscriptionId() external view returns (uint64) {
         return s_subscriptionId;
     }
 
+    /// @dev Inherited from IBondFunctionsConsumer. See interface for details.
     function getGasLimit() external view returns (uint32) {
         return i_gasLimit;
     }
 
+    /// @dev Inherited from IBondFunctionsConsumer. See interface for details.
     function getDonID() external view returns (bytes32) {
         return i_donID;
     }
+
+    /// @dev Inherited from IBondFunctionsConsumer. See interface for details.
     function getBondOracle() external view returns (address) {
         return i_bondOracle;
     }

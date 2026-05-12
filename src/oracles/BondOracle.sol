@@ -22,6 +22,7 @@ contract BondOracle is IBondOracle, ERC165, AccessControl {
         i_functionsConsumer = _functionsConsumer;
     }
 
+    /// @dev Inherited from IBondOracle. See interface for details.
     function updateYields(
         uint256[] memory _values,
         uint256 _timestamp,
@@ -32,7 +33,7 @@ contract BondOracle is IBondOracle, ERC165, AccessControl {
             return;
         }
 
-        // lunghezza già verificata nel Consumer, doppio check difensivo
+        // already checked in the consumer contract but we add this check here for extra security.
         if (_values.length < 4)
             revert BondOracle__IncompleteResponse(_values.length);
 
@@ -53,6 +54,7 @@ contract BondOracle is IBondOracle, ERC165, AccessControl {
         );
     }
 
+    /// @dev Inherited from IBondOracle. See interface for details.
     function getYield(uint256 _slot) external view returns (uint256) {
         BondYieldsResponse memory yields = s_bondYieldsResponse;
         if (_isStale(yields.timestamp)) revert BondOracle__DataIsStale();
@@ -65,28 +67,39 @@ contract BondOracle is IBondOracle, ERC165, AccessControl {
         revert BondOracle__InvalidSlot();
     }
 
+    /**
+     * @dev Checks if the yield data is stale.
+     * @param _yieldTimestamp The timestamp of the yield data.
+     * @return True if the data is stale, false otherwise.
+     */
+    function _isStale(uint256 _yieldTimestamp) internal view returns (bool) {
+        if (_yieldTimestamp == 0) return true;
+        return (block.timestamp - _yieldTimestamp) > STALENESS_THRESHOLD;
+    }
+
+
+    /// @dev Inherited from IBondOracle. See interface for details.
     function getAllYields() external view returns (BondYieldsResponse memory) {
         BondYieldsResponse memory yields = s_bondYieldsResponse;
         if (_isStale(yields.timestamp)) revert BondOracle__DataIsStale();
         return yields;
     }
 
+    /// @dev Inherited from IBondOracle. See interface for details.
     function isStale() public view returns (bool) {
         return _isStale(s_bondYieldsResponse.timestamp);
     }
 
-    function _isStale(uint256 _yieldTimestamp) internal view returns (bool) {
-        if (_yieldTimestamp == 0) return true;
-        return (block.timestamp - _yieldTimestamp) > STALENESS_THRESHOLD;
-    }
-
+    /// @dev Inherited from IBondOracle. See interface for details.
     function getLastUpdatedTimestamp() public view returns (uint256) {
         return s_bondYieldsResponse.timestamp;
     }
 
+    /// @dev Inherited from IBondOracle. See interface for details.
     function getFunctionsConsumer() public view returns (address) {
         return i_functionsConsumer;
     }
+
 
     function supportsInterface(
         bytes4 interfaceId

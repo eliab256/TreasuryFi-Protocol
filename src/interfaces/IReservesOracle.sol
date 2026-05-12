@@ -19,7 +19,16 @@ interface IReservesOracle {
     );
     event UsdValueUpdateFailed(bytes err);
 
-    // Actions (onlyRole UPDATER_ROLE)
+    // Actions 
+
+    /**
+     * @notice Updates the USD values for bonds and cash.
+     * @param bond An array containing the USD values of bonds.
+     * @param cash An array containing the USD values of cash buffers.
+     * @param timestamp The timestamp of when the data was fetched.
+     * @param signature The signature of the data.
+     * @param err The error message if the update failed.
+     */
     function updateUsdValues(
         uint256[4] memory bond,
         uint256[4] memory cash,
@@ -29,8 +38,28 @@ interface IReservesOracle {
     ) external;
 
     // Getters
+
+    /**
+     * @notice Gets the USD values for all reserves and liquidity buffers for each slot.
+     * @return A ReservesResponse struct containing the USD values and timestamp.
+     */
     function getAllReserves() external view returns (ReservesResponse memory);
+
+    /**
+     * @notice Gets the total USD value of the portfolio.
+     * @return The total USD value.
+     */
     function getTotalUsdValue() external view returns (uint256);
+
+    /**
+     * @notice Checks if the reserve data is stale.
+     * @return True if the data is stale, false otherwise.
+    */
     function isStale() external view returns (bool);
+    
+    /**
+     * @notice Gets the timestamp of the last update.
+     * @return The timestamp of the last update.
+     */
     function getLastUpdatedTimestamp() external view returns (uint256);
 }
