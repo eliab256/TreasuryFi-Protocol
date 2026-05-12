@@ -1,5 +1,7 @@
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
+import {PositionData} from "../types.sol";
+import {IERC3525} from "./IERC3525.sol";
 
 interface ITreasuryBondToken {
     // ------ Events ------
@@ -94,33 +96,63 @@ interface ITreasuryBondToken {
     function claimYield(uint256 _tokenId) external;
 
     // --- ERC3525/ERC721 ---
-    function ownerOf(uint256 tokenId) external view returns (address);
-    function balanceOf(uint256 tokenId) external view returns (uint256);
-    function balanceOf(address owner) external view returns (uint256);
-    function transferFrom(uint256 _fromTokenId, address _to, uint256 _value) external payable returns (uint256);
+    // function ownerOf(uint256 tokenId) external view returns (address);
+    // function balanceOf(uint256 tokenId) external view returns (uint256);
+    // function balanceOf(address owner) external view returns (uint256);
+    // function transferFrom(uint256 _fromTokenId, address _to, uint256 _value) external payable returns (uint256);
 
     /**
      * @notice Disabled function to prevent transfers between tokens.
      * @dev This function is intentionally disabled to enforce the non-transferable nature of the tokens.
      */
-    function transferFrom(uint256, uint256, uint256) external payable;
-    function transferFrom(address _from, address _to, uint256 _tokenId) external payable;
-    function safeTransferFrom(address _from, address _to, uint256 _tokenId, bytes memory _data) external payable;
-    function safeTransferFrom(address _from, address _to, uint256 _tokenId) external payable;
+    // function transferFrom(uint256, uint256, uint256) external payable;
+    // function transferFrom(address _from, address _to, uint256 _tokenId) external payable;
+    // function safeTransferFrom(address _from, address _to, uint256 _tokenId, bytes memory _data) external payable;
+    // function safeTransferFrom(address _from, address _to, uint256 _tokenId) external payable;
 
     // --- Getters ---
     function getTotalLiabilitiesPerSlot(uint256 _slot) external view returns (uint256);
     function getPositionData(uint256 _tokenId) external view returns (PositionData memory);
-    function name() external view returns (string memory);
-    function symbol() external view returns (string memory);
-    function valueDecimals() external view returns (uint8);
+    // function name() external view returns (string memory);
+    // function symbol() external view returns (string memory);
+    // function valueDecimals() external view returns (uint8);
 
-    // --- Compliance/Admin ---
+    // --- Compliance/Admin public functions for ERC3643 ---
+
+    /**
+     * @notice Sets the address of the IdentityRegistry contract from internal function in ERC3643 abstract contract.
+     * @dev check _setIdentityRegistry in ERC3643 for details.
+     * @param _identityRegistry The address of the IdentityRegistry contract.
+     */
     function setIdentityRegistry(address _identityRegistry) external;
+
+    /**
+     * @notice Sets the address of the OnchainID contract from internal function in ERC3643 abstract contract.
+     * @dev check _setOnchainID in ERC3643 for details.
+     * @param _onchainID The address of the OnchainID contract.
+     */
     function setOnchainID(address _onchainID) external;
+
+    /**
+     * @notice Sets the address of the Compliance contract from internal function in ERC3643 abstract contract.
+     * @dev check _setCompliance in ERC3643 for details.
+     * @param _compliance The address of the Compliance contract.
+     */
     function setCompliance(address _compliance) external;
+
+    /**
+     * @notice Pauses all token transfers and operations.
+     * @dev check _pause in ERC3643 for details.
+     */
     function pause() external;
+
+    /**
+     * @notice Unpauses all token transfers and operations.
+     * @dev check _unpause in ERC3643 for details.
+     */
     function unpause() external;
+
+
     function setAddressFrozen(address _userAddress, bool _freeze) external;
     function freezePartialTokens(uint256 _tokenId, uint256 _amount) external;
     function unfreezePartialTokens(uint256 _tokenId, uint256 _amount) external;

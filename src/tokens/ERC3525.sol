@@ -4,7 +4,7 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/utils/Context.sol";
 import "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IERC721} from "@solvprotocol/erc-3525/IERC721.sol";
-import {IERC3525} from "@solvprotocol/erc-3525/IERC3525.sol";
+import {IERC3525} from "../interfaces/IERC3525.sol";
 import {IERC721Receiver} from "@solvprotocol/erc-3525/IERC721Receiver.sol";
 import {IERC3525Receiver} from "@solvprotocol/erc-3525/IERC3525Receiver.sol";
 import {
@@ -12,30 +12,6 @@ import {
 } from "@solvprotocol/erc-3525/extensions/IERC721Enumerable.sol";
 
 contract ERC3525 is Context, IERC3525, IERC721Enumerable {
-    error ERC3525__InvalidTokenID();
-    error ERC3525__ApprovalToCurrentOwner();
-    error ERC3525__CallerIsNotOwnerNorApproved();
-    error ERC3525__BalanceQueryForZeroAddress();
-    error ERC3525__GlobalIndexOutOfBounds();
-    error ERC3525__OwnerIndexOutOfBounds();
-    error ERC3525__ApproveToCaller();
-    error ERC3525__InsufficientAllowance();
-    error ERC3525__MintToZeroAddress();
-    error ERC3525__CannotMintZeroTokenId();
-    error ERC3525__TokenAlreadyMinted();
-    error ERC3525__BurnValueExceedsBalance();
-    error ERC3525__ApproveValueToZeroAddress();
-    error ERC3525__ApproveCallerIsNotOwnerNorApprovedForAll();
-    error ERC3525__TransferCallerIsNotOwnerNorApproved();
-    error ERC3525__TransferToNonERC721Receiver();
-    error ERC3525__TransferRejectedByERC3525Receiver();
-    error ERC3525__TransferToNonERC721ReceiverImplementer();
-    error ERC3525__TransferToNonERC3525ReceiverImplementer();
-
-    // Nuovi eventi
-    event ReceivedERC3525(address indexed operator, uint256 indexed fromTokenId, uint256 indexed toTokenId, uint256 value, bytes data);
-    event ReceivedERC721(address indexed operator, address indexed from, uint256 indexed tokenId, bytes data);
-    event ContractChecked(address indexed contractAddress, bool supportsInterface, bytes4 interfaceId);
 
     struct TokenData {
         uint256 id;
@@ -52,6 +28,8 @@ contract ERC3525 is Context, IERC3525, IERC721Enumerable {
         mapping(address => bool) approvals;
     }
 
+    string internal s_name;
+    string internal s_symbol;
     uint8 internal immutable i_decimals;
     uint256 internal _tokenIdGenerator;
 
@@ -78,9 +56,11 @@ contract ERC3525 is Context, IERC3525, IERC721Enumerable {
         _;
     }
 
-    constructor( uint8 _decimals) {
+    constructor(string memory name_, string memory symbol_, uint8 decimals_) {
+        s_name = name_;
+        s_symbol = symbol_;
+        i_decimals = decimals_;
         _tokenIdGenerator = 1;
-        i_decimals = _decimals;
     }
 
     function supportsInterface(

@@ -3,6 +3,7 @@ pragma solidity ^0.8.0;
 
 import {ERC3525} from "./ERC3525.sol";
 import {ERC3643} from "./ERC3643.sol";
+import {IModularCompliance} from "@t-rex/compliance/modular/IModularCompliance.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import {YieldsMath} from "../library/YieldsMath.sol";
@@ -29,12 +30,15 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
 
     /// @dev constant unit value to calculate NAV.
     uint256 internal constant PAR = 1e18; 
+
     uint256 internal constant PERCENTAGE_YIELD_FEE = 20 * C.PERCENTAGE_PRECISION; // 20% fee on yield
     uint256 internal constant PERCENTAGE_ENTRY_FEE = 2 * C.PERCENTAGE_PRECISION / 10; // 0,2% fee on entry
     uint256 internal constant PERCENTAGE_EXIT_FEE_MAX = 5 * C.PERCENTAGE_PRECISION ; // 5% fee on exit
 
     uint256 private immutable i_minimumDepositAmount; // 10 USDC
 
+    /// @dev mapping from token ID to position data, which includes the entry yield and 
+    ///      the timestamp of when the position was opened.
     mapping(uint256 => PositionData) private s_fromIdToPositionData;
 
     bytes32 public constant FEES_MANAGER_ROLE = keccak256("FEES_MANAGER_ROLE");
@@ -61,7 +65,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
     constructor(
         TreasuryBondTokenConstructorParams memory _params
     ) ERC3643(_params.name, _params.symbol, _params.decimalsStandard, address(this), _params.identityRegistry, address(0)) 
-    ERC3525(_params.decimalsStandard) 
+    ERC3525(_params.name, _params.symbol, _params.decimalsStandard) 
     RiskManager(_params.bondAutomation, _params.reservesAutomation, _params.reservesOracle, _params.bondOracle, _params.treasury)
     UsdcUsdConverter(_params.usdcAddress, _params.usdcPriceFeedAddress, _params.decimalsStandard){
         // Checks for zero addresses
@@ -674,17 +678,17 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         if (_slot == C.SLOT_30Y) return C.D_MOD_30Y;
     }
 
-    /// @dev Inherit from ITreasuryBondToken. See interface for details.
-    function name() public view override returns (string memory) {
+    // /// @dev Inherit from ITreasuryBondToken. See interface for details.
+    function name() public view override(ERC3643, ERC3525) returns (string memory) {
         return super.name();
     }
 
-    /// @dev Inherit from ITreasuryBondToken. See interface for details.
-    function symbol() public view override returns (string memory) {
+    // /// @dev Inherit from ITreasuryBondToken. See interface for details.
+    function symbol() public view override(ERC3643, ERC3525) returns (string memory) {
         return super.symbol();
     }
 
-    /// @dev Inherit from ITreasuryBondToken. See interface for details.
+    // /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function valueDecimals() public view override(ERC3643, ERC3525) returns (uint8) {
         return super.valueDecimals();
     }
@@ -692,6 +696,12 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
 ////////////////////////////////////////////////////////////////////
 /////////////////////// ERC3643 inheritance //////////////////////// 
 ////////////////////////////////////////////////////////////////////  
+
+    function setNameAndSymbol(string calldata _name, string calldata _symbol) external onlyRole(OWNER_ROLE) {
+        (string memory name_, string memory symbol_) = _setNameAndSymbol(_name, _symbol);
+        s_name = name_;
+        s_symbol = symbol_;
+    }
      
     /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function setIdentityRegistry(address _identityRegistry) public onlyRole(OWNER_ROLE) {
@@ -785,6 +795,37 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         for (uint256 i = 0; i < _tokenId.length; i++) {
             _unfreezePartialToken(_tokenId[i], _amounts[i]);
         }
+    }
+
+////////////////////////////////////////////////////////////////////
+/////////////////// ERC3643 Getters inheritance //////////////////// 
+////////////////////////////////////////////////////////////////////  
+    function compliance() external view  returns (IModularCompliance) {
+        return s_tokenCompliance;
+    }
+
+    function paused() external view returns (bool) {
+        return s_tokenPaused;
+    }
+
+    function onchainID() public view returns (address) {
+        return s_tokenOnchainID;
+    }
+
+    function version() public pure returns (string memory) {
+        return TOKEN_VERSION;
+    }
+
+    function getWalletFrozenStatus(address _wallet) public view returns (bool) {
+        return s_frozenWallets[_wallet];
+    }
+
+    function getFrozenValue(uint256 _tokenId) public view returns (uint256) {
+        return s_frozenValues[_tokenId];
+    }
+
+    function getAvailableValue(uint256 _tokenId) public view returns (uint256) {
+        return balanceOf(_tokenId) - s_frozenValues[_tokenId];
     }
 
 }

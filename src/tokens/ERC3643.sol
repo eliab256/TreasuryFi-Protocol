@@ -47,8 +47,8 @@ abstract contract ERC3643 is AccessControl {
 
     /// @dev Token information
     /// @dev  decimals inherit from erc3525
-    string internal s_name;
-    string internal s_symbol;
+    // string internal s_name;
+    // string internal s_symbol;
     address internal s_tokenOnchainID;
     bool internal s_tokenPaused = false;
     string internal constant TOKEN_VERSION = "4.1.3";
@@ -56,7 +56,7 @@ abstract contract ERC3643 is AccessControl {
     /// @dev Variables of freeze and pause functions
     mapping(address => bool) internal s_frozenWallets;
     // mapping: tokenId => frozen value
-    mapping(uint256 => uint256) private s_frozenValues;
+    mapping(uint256 => uint256) internal s_frozenValues;
     bool internal s_recovering;
     /// @dev When true, bypasses pause, frozen-sender and frozen-receiver checks to allow regulatory forced transfers.
     bool internal s_forcedTransfer;
@@ -85,8 +85,6 @@ abstract contract ERC3643 is AccessControl {
         if( _identityRegistry == address(0)){
             revert ERC3643__ZeroAddress();
         }
-        s_name = _name;
-        s_symbol = _symbol;
         s_tokenOnchainID = _onchainID;
 
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
@@ -107,16 +105,11 @@ abstract contract ERC3643 is AccessControl {
         emit IdentityRegistryAdded(_identityRegistry);
     }
 
-    function setName(string calldata _name) external onlyRole(OWNER_ROLE) {
-          if (bytes(_name).length == 0) revert ERC3643__InvalidName();
-        s_name = _name;
-        emit UpdatedTokenInformation(_name, s_symbol, valueDecimals(), TOKEN_VERSION, s_tokenOnchainID);
-    }
-
-    function setSymbol(string calldata _symbol) external onlyRole(OWNER_ROLE) {
+    function _setNameAndSymbol(string calldata _name, string calldata _symbol) internal returns (string memory name, string memory symbol) {
+        if (bytes(_name).length == 0) revert ERC3643__InvalidName();
         if (bytes(_symbol).length == 0) revert ERC3643__InvalidSymbol();
-        s_symbol = _symbol;
-        emit UpdatedTokenInformation(s_name, _symbol, valueDecimals(), TOKEN_VERSION, s_tokenOnchainID);
+        emit UpdatedTokenInformation(_name, _symbol, valueDecimals(), TOKEN_VERSION, s_tokenOnchainID);
+        return (_name, _symbol);
     }
 
     /**
@@ -125,7 +118,7 @@ abstract contract ERC3643 is AccessControl {
     function _setOnchainID(address _onchainID) internal {
         if (_onchainID == address(0)) revert ERC3643__ZeroAddress();
         s_tokenOnchainID = _onchainID;
-        emit UpdatedTokenInformation(s_name, s_symbol, valueDecimals(), TOKEN_VERSION, _onchainID);
+        emit UpdatedTokenInformation(name(), symbol(), valueDecimals(), TOKEN_VERSION, _onchainID);
     }
 
     function recoveryAddress(
@@ -283,39 +276,6 @@ abstract contract ERC3643 is AccessControl {
         emit ComplianceAdded(_compliance);
     }
 
-////////////////////////////////////////////////////////////////////
-///////////////////////////// Getters ////////////////////////////// 
-////////////////////////////////////////////////////////////////////  
-
-
-    function compliance() external view  returns (IModularCompliance) {
-        return s_tokenCompliance;
-    }
-
-    function paused() external view returns (bool) {
-        return s_tokenPaused;
-    }
-
-    function onchainID() public view returns (address) {
-        return s_tokenOnchainID;
-    }
-
-    function version() public pure returns (string memory) {
-        return TOKEN_VERSION;
-    }
-
-    function getWalletFrozenStatus(address _wallet) public view returns (bool) {
-        return s_frozenWallets[_wallet];
-    }
-
-    function getFrozenValue(uint256 _tokenId) public view returns (uint256) {
-        return s_frozenValues[_tokenId];
-    }
-
-    function getAvailableValue(uint256 _tokenId) public view returns (uint256) {
-        return balanceOf(_tokenId) - s_frozenValues[_tokenId];
-    }
-
     function _beforeValueTransfer(
         address _from,
         address _to,
@@ -368,6 +328,9 @@ abstract contract ERC3643 is AccessControl {
 
 
     function valueDecimals() public view virtual returns (uint8);
+
+    function name() public view virtual returns (string memory);
+    function symbol() public view virtual returns (string memory);
 
 
 }
