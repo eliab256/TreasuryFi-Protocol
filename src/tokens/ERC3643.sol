@@ -51,6 +51,8 @@ abstract contract ERC3643 is AccessControl {
     // mapping: tokenId => frozen value
     mapping(uint256 => uint256) private s_frozenValues;
     bool internal s_recovering;
+    /// @dev When true, bypasses pause, frozen-sender and frozen-receiver checks to allow regulatory forced transfers.
+    bool internal s_forcedTransfer;
 
     bytes32 public constant OWNER_ROLE = keccak256("OWNER_ROLE"); 
 
@@ -113,7 +115,6 @@ abstract contract ERC3643 is AccessControl {
         emit UpdatedTokenInformation(s_name, s_symbol, valueDecimals(), TOKEN_VERSION, _onchainID);
     }
 
-    // @audit-issue aggiustare la funzione per erc3525
     function recoveryAddress(
     address _lostWallet,
     address _newWallet,
@@ -291,25 +292,32 @@ abstract contract ERC3643 is AccessControl {
         uint256 _toTokenId,
         uint256 _slot,
         uint256 _value) internal virtual {
-            _whenNotPaused();
+            // Forced transfers bypass the paused check: regulatory actions must remain executable even when the token is paused.
+            if (!s_forcedTransfer) _whenNotPaused();
             if(_from != address(0)){
                 if(! s_tokenIdentityRegistry.isVerified(_from)){
                     revert ERC3643__SenderNotVerified();
                 }
-                if (!s_recovering && s_frozenWallets[_from]) {
+                // Both s_recovering (address-recovery) and s_forcedTransfer bypass the frozen-sender check.
+                if (!s_recovering && !s_forcedTransfer && s_frozenWallets[_from]) {
                     revert ERC3643__SenderFrozen();
                 }
-                // @audit-info recuperare info da erc3525 per check frozen value
+                // Check that the value being transferred does not exceed the unfrozen balance of the source token.
+                // s_forcedTransfer bypasses this: forceTransfer() unfreezed the token before calling.
+                // s_recovering bypasses this: recoveryAddress() transfers full token ownership and frozen values follow the token.
+                if (!s_forcedTransfer && !s_recovering && _value > balanceOf(_fromTokenId) - s_frozenValues[_fromTokenId]) {
+                    revert ERC3643__AmountExceedsAvailableValue();
+                }
             }
             if(_to != address(0)){
                 if(! s_tokenIdentityRegistry.isVerified(_to)){
                     revert ERC3643__ReceiverNotVerified();
                 }
-                if(s_frozenWallets[_to]){
+                // Forced transfers bypass the frozen-receiver check: the regulator-designated recipient may be frozen.
+                if (!s_forcedTransfer && s_frozenWallets[_to]){
                     revert ERC3643__ReceiverFrozen();   
                 }
-
-                uint256 frozenValue = s_frozenValues[_toTokenId];
+              
             }
     }
 

@@ -34,6 +34,8 @@ abstract contract RiskManager {
     uint256 internal constant MAX_YIELD_SHOCK_BPS = 5 * C.PERCENTAGE_PRECISION; // 5% shock
     uint256 internal constant MAX_YIELD = 20 * C.PERCENTAGE_PRECISION; // 20% max yield for sanity checks
     uint256 internal constant MAX_RESERVES_SHOCK_BPS = 30 * C.PERCENTAGE_PRECISION; // 30% shock
+    uint256 private constant USD8_TO_USD18 = 1e10;
+
     IBondAutomation internal immutable i_yieldsAutomation;
     IReservesAutomation internal immutable i_reservesAutomation;
 
@@ -245,40 +247,53 @@ abstract contract RiskManager {
         if (!freezeSlot3) freezeSlot3 = _validateAndUpdateLastValidCashBuffer(C.SLOT_10Y, newReservesResponse.tenYearUsdCashValue);
         if (!freezeSlot4) freezeSlot4 = _validateAndUpdateLastValidCashBuffer(C.SLOT_30Y, newReservesResponse.thirtyYearUsdCashValue);
 
-        // 4. All slots valid — update storage with new data
+        // 4. All slots valid — update storage with new data (convert USD8 → USD18)
         if (!freezeSlot1 && !freezeSlot2 && !freezeSlot3 && !freezeSlot4) {
-            s_lastValidReserves = newReservesResponse;
+            s_lastValidReserves = ReservesResponse({
+                twoYearUsdBondsValue:    newReservesResponse.twoYearUsdBondsValue    * USD8_TO_USD18,
+                fiveYearUsdBondsValue:   newReservesResponse.fiveYearUsdBondsValue   * USD8_TO_USD18,
+                tenYearUsdBondsValue:    newReservesResponse.tenYearUsdBondsValue    * USD8_TO_USD18,
+                thirtyYearUsdBondsValue: newReservesResponse.thirtyYearUsdBondsValue * USD8_TO_USD18,
+                twoYearUsdCashValue:    newReservesResponse.twoYearUsdCashValue    * USD8_TO_USD18,
+                fiveYearUsdCashValue:   newReservesResponse.fiveYearUsdCashValue   * USD8_TO_USD18,
+                tenYearUsdCashValue:    newReservesResponse.tenYearUsdCashValue    * USD8_TO_USD18,
+                thirtyYearUsdCashValue: newReservesResponse.thirtyYearUsdCashValue * USD8_TO_USD18,
+                cashBufferUsdTotalValue: newReservesResponse.cashBufferUsdTotalValue * USD8_TO_USD18,
+                totalUsdBondsValue:      newReservesResponse.totalUsdBondsValue      * USD8_TO_USD18,
+                totalUsdPortfolioValue:  newReservesResponse.totalUsdPortfolioValue  * USD8_TO_USD18,
+                timestamp: newReservesResponse.timestamp
+            });
             return (false, false, false, false);
         }
 
         // 5. At least one anomaly — build mixed response
-        // frozen slots keep old values, healthy slots get new values
+        // frozen slots keep old values (already USD18), healthy slots get new values (convert USD8 → USD18)
         ReservesResponse memory cached = s_lastValidReserves;
         s_lastValidReserves = ReservesResponse({
-            twoYearUsdBondsValue:    freezeSlot1 ? cached.twoYearUsdBondsValue    : newReservesResponse.twoYearUsdBondsValue,
-            fiveYearUsdBondsValue:   freezeSlot2 ? cached.fiveYearUsdBondsValue   : newReservesResponse.fiveYearUsdBondsValue,
-            tenYearUsdBondsValue:    freezeSlot3 ? cached.tenYearUsdBondsValue    : newReservesResponse.tenYearUsdBondsValue,
-            thirtyYearUsdBondsValue: freezeSlot4 ? cached.thirtyYearUsdBondsValue : newReservesResponse.thirtyYearUsdBondsValue,
+            twoYearUsdBondsValue:    freezeSlot1 ? cached.twoYearUsdBondsValue    : newReservesResponse.twoYearUsdBondsValue    * USD8_TO_USD18,
+            fiveYearUsdBondsValue:   freezeSlot2 ? cached.fiveYearUsdBondsValue   : newReservesResponse.fiveYearUsdBondsValue   * USD8_TO_USD18,
+            tenYearUsdBondsValue:    freezeSlot3 ? cached.tenYearUsdBondsValue    : newReservesResponse.tenYearUsdBondsValue    * USD8_TO_USD18,
+            thirtyYearUsdBondsValue: freezeSlot4 ? cached.thirtyYearUsdBondsValue : newReservesResponse.thirtyYearUsdBondsValue * USD8_TO_USD18,
 
-            twoYearUsdCashValue:    freezeSlot1 ? cached.twoYearUsdCashValue    : newReservesResponse.twoYearUsdCashValue,
-            fiveYearUsdCashValue:   freezeSlot2 ? cached.fiveYearUsdCashValue   : newReservesResponse.fiveYearUsdCashValue,
-            tenYearUsdCashValue:    freezeSlot3 ? cached.tenYearUsdCashValue    : newReservesResponse.tenYearUsdCashValue,
-            thirtyYearUsdCashValue: freezeSlot4 ? cached.thirtyYearUsdCashValue : newReservesResponse.thirtyYearUsdCashValue,
+            twoYearUsdCashValue:    freezeSlot1 ? cached.twoYearUsdCashValue    : newReservesResponse.twoYearUsdCashValue    * USD8_TO_USD18,
+            fiveYearUsdCashValue:   freezeSlot2 ? cached.fiveYearUsdCashValue   : newReservesResponse.fiveYearUsdCashValue   * USD8_TO_USD18,
+            tenYearUsdCashValue:    freezeSlot3 ? cached.tenYearUsdCashValue    : newReservesResponse.tenYearUsdCashValue    * USD8_TO_USD18,
+            thirtyYearUsdCashValue: freezeSlot4 ? cached.thirtyYearUsdCashValue : newReservesResponse.thirtyYearUsdCashValue * USD8_TO_USD18,
 
             // total cash buffer: se almeno uno slot è frozen, tieni il valore cached
             cashBufferUsdTotalValue: (freezeSlot1 || freezeSlot2 || freezeSlot3 || freezeSlot4)
                 ? cached.cashBufferUsdTotalValue
-                : newReservesResponse.cashBufferUsdTotalValue,
+                : newReservesResponse.cashBufferUsdTotalValue * USD8_TO_USD18,
 
             // total bonds value: solo se tutti frozen tieni cached, altrimenti ricalcola
             totalUsdBondsValue: (freezeSlot1 && freezeSlot2 && freezeSlot3 && freezeSlot4)
                 ? cached.totalUsdBondsValue
-                : newReservesResponse.totalUsdBondsValue,
+                : newReservesResponse.totalUsdBondsValue * USD8_TO_USD18,
 
             // total portfolio value: solo se tutti frozen tieni cached, altrimenti ricalcola
             totalUsdPortfolioValue: (freezeSlot1 && freezeSlot2 && freezeSlot3 && freezeSlot4)
                 ? cached.totalUsdPortfolioValue
-                : newReservesResponse.totalUsdPortfolioValue,
+                : newReservesResponse.totalUsdPortfolioValue * USD8_TO_USD18,
 
             timestamp: cached.timestamp
         });

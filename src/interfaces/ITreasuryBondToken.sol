@@ -51,4 +51,6 @@ interface ITreasuryBondToken {
     error TreasuryBondToken__AmountExceedsAvailableBalance();
     error TreasuryBondToken__AmountShouldBeLessOrEqualToFrozen();
     error TreasuryBondToken__LockPeriodNotElapsed();
+    error TreasuryBondToken__InvalidTokenOwner();
+    error TreasuryBondToken__ForcedTransferFailed();
 }

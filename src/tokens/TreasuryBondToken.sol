@@ -237,10 +237,65 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         return (usdcPayout, netYieldToClaimInUsdc, managmentFeeInUsdc , earlyRedeemFeeUsdc, currentNAV);
     }
 
-    function forceTransfer() onlyRole(OWNER_ROLE) public {
-        // @audit-issue implement forceTransfer function
-        // questa funzione permette al protocol owner di forzare il trasferimento di un token da un wallet all' altro in caso di furto o smarrimento
-        // implementare checks per evitare abusi (es. solo wallet frozen, solo una volta ogni tot tempo, etc.)
+    /**
+     * @notice Forces the transfer of a token from one wallet to another on behalf of a regulatory authority.
+     * @dev Bypasses standard compliance checks (frozen sender/receiver, paused state).
+     *      The receiver must still be a verified identity in the IdentityRegistry.
+     *      Accrued yield is settled to _from before the transfer.
+     *      Any frozen value on the token is released before the transfer is executed.
+     * @param _from The current owner of the token.
+     * @param _to   The receiver of the token. Must be KYC-verified.
+     * @param _tokenId The token to transfer.
+     * @return bool true if successful.
+     */
+    function forceTransfer(
+        address _from,
+        address _to,
+        uint256 _tokenId
+    ) public onlyRole(OWNER_ROLE) returns (bool) {
+        if (ownerOf(_tokenId) != _from) revert TreasuryBondToken__InvalidTokenOwner();
+
+        uint256 slot = slotOf(_tokenId);
+        uint256 tokenValue = balanceOf(_tokenId);
+
+        // 1. Settle all accrued yield to _from before the transfer.
+        //    This mirrors the behaviour of _beforeTransfer for regular transfers.
+        (uint256 netPayout, uint256 managementFee) = _claimYield(_tokenId, s_fromIdToPositionData[_tokenId]);
+        if (netPayout + managementFee > 0) {
+            _validateLiquidity(slot, netPayout + managementFee);
+            i_treasury.transferUsdcFromYieldClaim(netPayout, _from, slot, managementFee);
+        }
+
+        // 2. Unfreeze any frozen value on the token so the ERC3525 transfer is not blocked.
+        uint256 frozenVal = getFrozenValue(_tokenId);
+        if (frozenVal > 0) _unfreezePartialToken(_tokenId, frozenVal);
+
+        // 3. Execute the transfer bypassing compliance and freeze checks.
+        //    s_forcedTransfer is set/reset around the external call so the flag is
+        //    always cleared even if the inner call reverts.
+        s_forcedTransfer = true;
+        try this._executeForcedTransferExternal(_from, _to, _tokenId) {
+            s_forcedTransfer = false;
+        } catch {
+            s_forcedTransfer = false;
+            revert TreasuryBondToken__ForcedTransferFailed();
+        }
+
+        emit ForceTransfer(_from, _to, _tokenId, tokenValue);
+        return true;
+    }
+
+    /**
+     * @notice Public wrapper required for try/catch in forceTransfer.
+     * @dev Solidity requires that calls in try/catch blocks are external. We use `this.` to make an
+     *      external call to the contract itself. The onlyRole guard prevents arbitrary external calls.
+     */
+    function _executeForcedTransferExternal(
+        address _from,
+        address _to,
+        uint256 _tokenId
+    ) external onlyRole(OWNER_ROLE) {
+        _transferTokenId(_from, _to, _tokenId);
     }
 
 

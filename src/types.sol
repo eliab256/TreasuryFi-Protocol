@@ -55,6 +55,33 @@ struct PositionData {
     uint256 lastClaimTimestamp; // block.timestamp of the last yield claim, used to calculate claimable yield since last claim
 }
 
+/**
+ * @notice Stores risk parameters for each slot, which can be updated by the RiskManager.
+ *
+ * @param reserveBuffer           The percentage of overcollateralization required for the slot, expressed as a percentage 
+ *                                with base 100 (e.g. 110 means 110% collateralization). This parameter is used to calculate the 
+ *                                required collateralization for positions in this slot and to trigger liquidations if the 
+ *                                collateralization falls below this threshold.
+ *
+ * @param maxDailyRedeem          The maximum volume of USDC that can be redeemed from this slot in a single day. 
+ *                                This parameter is used to limit the amount of liquidity that can be withdrawn from the
+ *                                slot on a daily basis, helping to manage liquidity risk and prevent large sudden outflows.
+ *
+ * @param redeemWindowOpen        The time (in seconds from the start of the week, e.g. 0 for Sunday midnight UTC) when the 
+ *                                redeem window opens. This parameter is used to define specific time windows during which 
+ *                                redemptions are allowed, helping to manage liquidity and operational risk.
+ *
+ * @param redeemWindowDuration    The duration (in seconds) of the redeem window. This parameter, together with redeemWindowOpen, 
+ *                                defines the time periods during which users can redeem their positions, allowing the protocol 
+ *                                to manage liquidity and operational risk more effectively.      
+ */
+struct SlotRiskParams {
+    uint256 reserveBuffer;        // % overcollateral (es. 110 = 110%), base 100
+    uint256 maxDailyRedeem;       // cap volume redeem giornaliero per slot
+    uint256 redeemWindowOpen;     // secondi dall'inizio settimana (V1 stub = 0)
+    uint256 redeemWindowDuration; // durata finestra in secondi (V1 stub = 0)
+}
+
 struct TreasuryBondTokenConstructorParams {
     string name;
     string symbol;
