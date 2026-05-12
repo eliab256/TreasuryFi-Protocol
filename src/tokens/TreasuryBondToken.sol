@@ -34,7 +34,6 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
     uint256 internal constant PERCENTAGE_EXIT_FEE_MAX = 5 * C.PERCENTAGE_PRECISION ; // 5% fee on exit
 
     uint256 private immutable i_minimumDepositAmount; // 10 USDC
-    ITreasury private immutable i_treasury;
 
     mapping(uint256 => PositionData) private s_fromIdToPositionData;
 
@@ -56,7 +55,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         TreasuryBondTokenConstructorParams memory _params
     ) ERC3643(_params.name, _params.symbol, _params.decimalsStandard, address(this), _params.identityRegistry, address(0)) 
     ERC3525(_params.decimalsStandard) 
-    RiskManager(_params.bondAutomation, _params.reservesAutomation, _params.reservesOracle, _params.bondOracle)
+    RiskManager(_params.bondAutomation, _params.reservesAutomation, _params.reservesOracle, _params.bondOracle, _params.treasury)
     UsdcUsdConverter(_params.usdcAddress, _params.usdcPriceFeedAddress, _params.decimalsStandard){
         // Checks for zero addresses
         
@@ -103,7 +102,6 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         _grantRole(AUTOMATION_TRIGGERER_ROLE, msg.sender);
         _grantRole(UPDATE_RISK_MANAGER_VALUES_ROLE, _params.updateRiskManagerAutomation);
         _grantRole(UPDATE_RISK_MANAGER_VALUES_ROLE, msg.sender);
-        i_treasury = ITreasury(_params.treasury);
         i_minimumDepositAmount = 10 * (10 ** i_usdcDecimals); // 10 USDC with decimals
 
     }
@@ -180,6 +178,8 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         uint256 slot = slotOf(_tokenId);
         uint256 tokenBalance = balanceOf(_tokenId);
         (uint256 usdcPayout, uint256 netYieldToClaimInUsdc, uint256 managmentFeeInUsdc , uint256 earlyRedeemFeeUsdc, uint256 currentNAV) = _closePositionValue(_tokenId, slot, tokenBalance);
+        uint256 totalUsdcOutFromSlotLiquidity = usdcPayout + netYieldToClaimInUsdc + earlyRedeemFeeUsdc + managmentFeeInUsdc;
+        _validateLiquidity(slot, totalUsdcOutFromSlotLiquidity);
         _burn(_tokenId);
         i_treasury.withdrawUsdcFromClosePosition(usdcPayout, owner, slot, netYieldToClaimInUsdc, earlyRedeemFeeUsdc, managmentFeeInUsdc);
         // emit event position closed
@@ -193,6 +193,8 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         address owner = ownerOf(_tokenId);
         uint256 slot = slotOf(_tokenId);
         (uint256 usdcPayout, uint256 netYieldToClaimInUsdc, uint256 managmentFeeInUsdc , uint256 earlyRedeemFeeUsdc, uint256 currentNAV) = _closePositionValue(_tokenId, slot, _valueToBurn);
+        uint256 totalUsdcOutFromSlotLiquidity = usdcPayout + netYieldToClaimInUsdc + earlyRedeemFeeUsdc + managmentFeeInUsdc;
+        _validateLiquidity(slot, totalUsdcOutFromSlotLiquidity);
         _burnValue(_tokenId, _valueToBurn);
         i_treasury.withdrawUsdcFromClosePosition(usdcPayout, owner, slot, netYieldToClaimInUsdc, earlyRedeemFeeUsdc, managmentFeeInUsdc);
 
@@ -210,7 +212,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         uint256 _tokenId,
         uint256 _slot,
         uint256 _valueToBurn
-    ) internal returns (uint256 netYieldToClaimInUsdc, uint256 managmentFeeInUsdc, uint256 earlyRedeemFeeUsdc, uint256 usdcPayout, uint256 currentNAV){
+    ) internal returns (uint256 usdcPayout, uint256 netYieldToClaimInUsdc, uint256 managmentFeeInUsdc, uint256 earlyRedeemFeeUsdc, uint256 currentNAV){
         // 1. Get the current yield for the slot 
         uint256 currentYield = s_lastValidYieldPerSlot[_slot];
 
@@ -225,8 +227,8 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         uint256 usdPayoutBeforeFees = (_valueToBurn * currentNAV) / PAR;
 
         // 5. Convert payout and fees from USD with 18 decimals to USDC with 6 decimals
-  
         uint256 usdcPayoutBeforeFees = _convertUsd18ToUsdc(usdPayoutBeforeFees);
+
         // 6. Calculate early redeem fee if the position is closed before the penalty period for that slot
         earlyRedeemFeeUsdc = _calculateEarlyRedeemFee(posData.mintTimestamp, usdcPayoutBeforeFees, _slot);
         
@@ -413,7 +415,8 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
     ) internal {
         // Claim yield accrued on the source token before the transfer
         (uint256 netPayout, uint256 managementFee) = _claimYield(_fromTokenId, s_fromIdToPositionData[_fromTokenId]);
-        i_treasury.transferUsdcFromYieldClaim(netPayout + managementFee, _from, _slot, managementFee);
+        _validateLiquidity(_slot, netPayout + managementFee);
+        i_treasury.transferUsdcFromYieldClaim(netPayout, _from, _slot, managementFee);
 
         // Partial transfer (value-split): _beforeMint already wrote a default PositionData on _toTokenId.
         // Overwrite it here with the source token's entryYield, entryNAV and mintTimestamp so the lock
@@ -454,7 +457,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
 
     function _calculateEntryFees(
         uint256 _amount
-    ) internal returns (uint256 netAmount, uint256 feeCollected) {
+    ) internal pure returns (uint256 netAmount, uint256 feeCollected) {
         feeCollected = (_amount * PERCENTAGE_ENTRY_FEE) / C.MAX_PERCENTAGE;
         netAmount = _amount - feeCollected;
     }

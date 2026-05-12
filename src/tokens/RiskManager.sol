@@ -6,6 +6,7 @@ import {IBondAutomation} from "../interfaces/IBondAutomation.sol";
 import {IReservesAutomation} from "../interfaces/IReservesAutomation.sol";
 import {IBondOracle} from "../interfaces/IBondOracle.sol";
 import {IReservesOracle} from "../interfaces/IReservesOracle.sol";
+import {ITreasury} from "../interfaces/ITreasury.sol";
 
 
 abstract contract RiskManager {
@@ -19,6 +20,7 @@ abstract contract RiskManager {
     error RiskManager__SlotAlreadyInState(uint256 slot, bool frozen);
     error RiskManager__StaleOracleData();
     error RiskManager__InvalidReserve(uint256 slot, uint256 reserve);
+    error RiskManager__InsufficientLiquidity(uint256 slot, uint256 availableLiquidity, uint256 requiredLiquidity);
 
     event SlotFrozen(uint256 indexed slot);
     event SlotUnfrozen(uint256 indexed slot);
@@ -37,6 +39,7 @@ abstract contract RiskManager {
 
     IReservesOracle internal immutable i_reservesOracle;
     IBondOracle internal immutable i_yieldsOracle;
+    ITreasury internal immutable i_treasury;
 
     uint256 internal immutable i_gracePeriod;
     uint256 internal immutable i_interval;
@@ -74,12 +77,14 @@ abstract contract RiskManager {
      * @param _reservesAutomation Address of the ReservesAutomation contract.
      * @param _reservesOracle Address of the ReservesOracle contract.
      * @param _yieldsOracle Address of the BondOracle contract.
+     * @param _treasury Address of the Treasury contract, used to check liquidity for close and claim operations.
      */
-    constructor(address _yieldsAutomation, address _reservesAutomation, address _reservesOracle, address _yieldsOracle) {
+    constructor(address _yieldsAutomation, address _reservesAutomation, address _reservesOracle, address _yieldsOracle, address _treasury) {
         i_yieldsAutomation = IBondAutomation(_yieldsAutomation);
         i_reservesAutomation = IReservesAutomation(_reservesAutomation);
         i_reservesOracle = IReservesOracle(_reservesOracle);
         i_yieldsOracle = IBondOracle(_yieldsOracle);
+        i_treasury = ITreasury(_treasury);
         (i_interval , i_gracePeriod, ) = i_yieldsAutomation.getAllUpkeepInfo();
     }
 
@@ -291,11 +296,12 @@ abstract contract RiskManager {
         }
         uint256 lastValidReserve = s_lastValidReservePerSlot[_slot];
         if(lastValidReserve != 0) {
-            uint256 shock = _reserve > lastValidReserve ? _reserve - lastValidReserve : 
+            uint256 delta = _reserve > lastValidReserve ? _reserve - lastValidReserve : 
             lastValidReserve - _reserve;
-            if (shock > MAX_RESERVES_SHOCK_BPS) {
+            uint256 shockBps = (delta * C.MAX_PERCENTAGE) / lastValidReserve;
+            if (shockBps > MAX_RESERVES_SHOCK_BPS) {
                 freezeSlot = true;
-                emit ExcessiveReserveShock(_slot, shock);
+                emit ExcessiveReserveShock(_slot, shockBps);
                 return freezeSlot;
             }
         }
@@ -311,11 +317,12 @@ abstract contract RiskManager {
         }
         uint256 lastValidCashBuffer = s_lastValidCashBufferPerSlot[_slot];
         if(lastValidCashBuffer != 0) {
-            uint256 shock = _cashBuffer > lastValidCashBuffer ? _cashBuffer - lastValidCashBuffer : 
+            uint256 delta = _cashBuffer > lastValidCashBuffer ? _cashBuffer - lastValidCashBuffer : 
             lastValidCashBuffer - _cashBuffer;
-            if (shock > MAX_RESERVES_SHOCK_BPS) {
+            uint256 shockBps = (delta * C.MAX_PERCENTAGE) / lastValidCashBuffer;
+            if (shockBps > MAX_RESERVES_SHOCK_BPS) {
                 freezeSlot = true;
-                emit ExcessiveCashBufferShock(_slot, shock);
+                emit ExcessiveCashBufferShock(_slot, shockBps);
                 return freezeSlot;
             }
         }
@@ -352,6 +359,16 @@ abstract contract RiskManager {
     }
 
 ////////////////////////////////////////////////////////////////////
+////////////////////// Liquidity validation //////////////////////// 
+////////////////////////////////////////////////////////////////////  
+    function _validateLiquidity(uint256 _slot, uint256 _requiredLiquidity) internal {
+        uint256 availableLiquidity = i_treasury.getTotalUsdcPerSlot(_slot);
+        if (availableLiquidity < _requiredLiquidity) {
+            revert RiskManager__InsufficientLiquidity(_slot, availableLiquidity, _requiredLiquidity);
+        }
+    } 
+
+////////////////////////////////////////////////////////////////////
 /////////////////// Return oracle data confirmed /////////////////// 
 ////////////////////////////////////////////////////////////////////  
 
@@ -383,57 +400,34 @@ abstract contract RiskManager {
 
     function _riskManagerBeforeMint(uint256 _slot, uint256 _value) internal {
 
-        // @audit-issue forse eliminare 1 2 e 3 perchè già presennti in _getLastValidYields e _getLastValidReserves, oppure chiamare questi ultimi per evitare di ripetere i check
-        // 1. Check if oracle data is not stale, to avoid using outdated data
-        if (i_yieldsOracle.isStale()) revert RiskManager__StaleOracleData();
-        if (i_reservesOracle.isStale()) revert RiskManager__StaleOracleData();
+        // 1. _getLastValidYields checks if data are stale and if slot is frozen, if not return the data struct
+        BondYieldsResponse memory yields = _getLastValidYields(_slot);
+        ReservesResponse memory reserves = _getLastValidReserves(_slot);
 
-        // 2. Check if slot is frozen due to detected shock or oracle malfunction
-        if (s_slotState[_slot].frozen) revert RiskManager__SlotFrozen(_slot);
+        // 2. Check if reserves are sufficient for the new position, considering the new liabilities
 
-        // 3. Retreive the current data from oracles
-        BondYieldsResponse memory yields = s_lastValidYields;
-        ReservesResponse memory reserves = s_lastValidReserves;
-
-        // 4. Check if reserves are sufficient for the new position, considering the new liabilities
-
-        // 5. Update storage
-        // 5.1 Update total liabilities for the slot
+        // 3. Update storage
+        // 3.1 Update total liabilities for the slot
         s_totalLiabilitiesPerSlot[_slot] += _value;
     }
 
     function _riskManagerBeforeBurn(uint256 _slot, uint256 _value) internal {
+        // 1. _getLastValidYields checks if data are stale and if slot is frozen, if not return the data struct
+        BondYieldsResponse memory yields = _getLastValidYields(_slot);
+        ReservesResponse memory reserves = _getLastValidReserves(_slot);
 
-        // 1. Check if oracle data is not stale, to avoid using outdated data
-        if (i_yieldsOracle.isStale()) revert RiskManager__StaleOracleData();
-        if (i_reservesOracle.isStale()) revert RiskManager__StaleOracleData();
+        // 2. Check if liquidity is sufficient for the redemption, considering the new liabilities
 
-        // 2. Check if slot is frozen due to detected shock or oracle malfunction
-        if (s_slotState[_slot].frozen) revert RiskManager__SlotFrozen(_slot);
-
-        // 3. Retreive the current data from oracles
-        BondYieldsResponse memory yields = s_lastValidYields;
-        ReservesResponse memory reserves = s_lastValidReserves;
-
-        // 4. Check if liquidity is sufficient for the redemption, considering the new liabilities
-
-        // 5. Update storage
-        // 5.1 Update total liabilities for the slot
+        // 3. Update storage
+        // 3.1 Update total liabilities for the slot
         s_totalLiabilitiesPerSlot[_slot] -= _value;
     }
 
     // claiming yield trigger before mint, attenzione
     function _riskManagerBeforeClaimingYield(uint256 _slot, uint256 _value) internal {
-
-        // 1. Check if oracle data is not stale, to avoid using outdated data
-        if (i_yieldsOracle.isStale()) revert RiskManager__StaleOracleData();
-        if (i_reservesOracle.isStale()) revert RiskManager__StaleOracleData();
-        // 2. Check if slot is frozen due to detected shock or oracle malfunction
-        if (s_slotState[_slot].frozen) revert RiskManager__SlotFrozen(_slot);
-
-        // 3. Retreive the current data from oracles
-        BondYieldsResponse memory yields = s_lastValidYields;
-        ReservesResponse memory reserves = s_lastValidReserves;
+        // 1. _getLastValidYields checks if data are stale and if slot is frozen, if not return the data struct
+        BondYieldsResponse memory yields = _getLastValidYields(_slot);
+        ReservesResponse memory reserves = _getLastValidReserves(_slot);
 
         // 5. Update storage
         // 5.1 Update total liabilities for the slot
