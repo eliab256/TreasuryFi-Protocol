@@ -12,7 +12,7 @@ import {UsdcUsdConverter} from "./UsdcUsdConverter.sol";
 import {IBondOracle} from "../interfaces/IBondOracle.sol";
 import {IReservesOracle} from "../interfaces/IReservesOracle.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
-import {PositionData, TreasuryBondTokenConstructorParams} from "../types.sol";
+import {PositionData, TreasuryBondTokenConstructorParams, SlotRiskParams} from "../types.sol";
 import {TokenConstants as C} from "./TokenConstants.sol";
 import {IBondAutomation} from "../interfaces/IBondAutomation.sol";
 import {IReservesAutomation} from "../interfaces/IReservesAutomation.sol";
@@ -47,6 +47,12 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
 
     modifier onlyValidSlot(uint256 slot) {
         _onlyValidSlot(slot);
+        _;
+    }
+
+    modifier onlySlotWithRiskParamsSet(uint256 slot) {
+        _onlyValidSlot(slot);
+        _checkSlotRiskParamsSet(slot);
         _;
     }
 
@@ -127,6 +133,11 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
 ///////////////////// RiskManager inheritance ////////////////////// 
 ////////////////////////////////////////////////////////////////////  
 
+    /// @dev Inherited from RiskManager. See parent contract for details.
+    function setSlotRiskParams(uint256 _slot, SlotRiskParams memory _params) public onlyRole(OWNER_ROLE) onlyValidSlot(_slot) {
+        _setSlotRiskParams(_slot, _params);
+    }
+
     /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function triggerReservesUpkeep() public onlyRole(AUTOMATION_TRIGGERER_ROLE) {
         _triggerReservesUpkeep();
@@ -156,7 +167,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         address _mintTo,
         uint256 _slot,
         uint256 _value
-    ) public onlyValidSlot(_slot) nonReentrant {
+    ) public onlySlotWithRiskParamsSet(_slot) nonReentrant {
         if (_value < i_minimumDepositAmount) {
             revert TreasuryBondToken__InvalidValue();
         }
@@ -181,7 +192,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         uint256 tokenBalance = balanceOf(_tokenId);
         (uint256 usdcPayout, uint256 netYieldToClaimInUsdc, uint256 managmentFeeInUsdc , uint256 earlyRedeemFeeUsdc, uint256 currentNAV) = _closePositionValue(_tokenId, slot, tokenBalance);
         uint256 totalUsdcOutFromSlotLiquidity = usdcPayout + netYieldToClaimInUsdc + earlyRedeemFeeUsdc + managmentFeeInUsdc;
-        _validateLiquidity(slot, totalUsdcOutFromSlotLiquidity);
+        _validateInstantLiquidity(slot, totalUsdcOutFromSlotLiquidity);
         _burn(_tokenId);
         i_treasury.withdrawUsdcFromClosePosition(usdcPayout, owner, slot, netYieldToClaimInUsdc, earlyRedeemFeeUsdc, managmentFeeInUsdc);
         // emit event position closed
@@ -197,13 +208,51 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         uint256 slot = slotOf(_tokenId);
         (uint256 usdcPayout, uint256 netYieldToClaimInUsdc, uint256 managmentFeeInUsdc , uint256 earlyRedeemFeeUsdc, uint256 currentNAV) = _closePositionValue(_tokenId, slot, _valueToBurn);
         uint256 totalUsdcOutFromSlotLiquidity = usdcPayout + netYieldToClaimInUsdc + earlyRedeemFeeUsdc + managmentFeeInUsdc;
-        _validateLiquidity(slot, totalUsdcOutFromSlotLiquidity);
+        _validateInstantLiquidity(slot, totalUsdcOutFromSlotLiquidity);
         _burnValue(_tokenId, _valueToBurn);
         i_treasury.withdrawUsdcFromClosePosition(usdcPayout, owner, slot, netYieldToClaimInUsdc, earlyRedeemFeeUsdc, managmentFeeInUsdc);
 
         uint256 remainingBalance = balanceOf(_tokenId); // get remaining balance after burn
         //emit event position partially closed  
         emit PartialPositionClosed(owner, _tokenId, slot, _valueToBurn, remainingBalance, usdcPayout, currentNAV);
+    }
+
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
+    function forceTransfer(
+        address _from,
+        address _to,
+        uint256 _tokenId
+    ) public onlyRole(OWNER_ROLE) returns (bool) {
+        if (ownerOf(_tokenId) != _from) revert TreasuryBondToken__InvalidTokenOwner();
+
+        uint256 slot = slotOf(_tokenId);
+        uint256 tokenValue = balanceOf(_tokenId);
+
+        // 1. Settle all accrued yield to _from before the transfer.
+        //    This mirrors the behaviour of _beforeTransfer for regular transfers.
+        (uint256 netPayout, uint256 managementFee) = _claimYield(_tokenId, s_fromIdToPositionData[_tokenId]);
+        if (netPayout + managementFee > 0) {
+            _validateInstantLiquidity(slot, netPayout + managementFee);
+            i_treasury.transferUsdcFromYieldClaim(netPayout, _from, slot, managementFee);
+        }
+
+        // 2. Unfreeze any frozen value on the token so the ERC3525 transfer is not blocked.
+        uint256 frozenVal = getFrozenValue(_tokenId);
+        if (frozenVal > 0) _unfreezePartialToken(_tokenId, frozenVal);
+
+        // 3. Execute the transfer bypassing compliance and freeze checks.
+        //    s_forcedTransfer is set/reset around the external call so the flag is
+        //    always cleared even if the inner call reverts.
+        s_forcedTransfer = true;
+        try this._executeForcedTransferExternal(_from, _to, _tokenId) {
+            s_forcedTransfer = false;
+        } catch {
+            s_forcedTransfer = false;
+            revert TreasuryBondToken__ForcedTransferFailed();
+        }
+
+        emit ForceTransfer(_from, _to, _tokenId, tokenValue);
+        return true;
     }
 
     /**
@@ -228,7 +277,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         uint256 _valueToBurn
     ) internal returns (uint256 usdcPayout, uint256 netYieldToClaimInUsdc, uint256 managmentFeeInUsdc, uint256 earlyRedeemFeeUsdc, uint256 currentNAV){
         // 1. Get the current yield for the slot 
-        uint256 currentYield = s_lastValidYieldPerSlot[_slot];
+        uint256 currentYield = s_lastValidSlotMarketData[_slot].yield;
 
         // 2. get position data
         PositionData memory posData = s_fromIdToPositionData[_tokenId];
@@ -249,44 +298,6 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         // 7. Returns parameter to call treasury withdraw function 
         usdcPayout = usdcPayoutBeforeFees - earlyRedeemFeeUsdc;
         return (usdcPayout, netYieldToClaimInUsdc, managmentFeeInUsdc , earlyRedeemFeeUsdc, currentNAV);
-    }
-
-    /// @dev Inherit from ITreasuryBondToken. See interface for details.
-    function forceTransfer(
-        address _from,
-        address _to,
-        uint256 _tokenId
-    ) public onlyRole(OWNER_ROLE) returns (bool) {
-        if (ownerOf(_tokenId) != _from) revert TreasuryBondToken__InvalidTokenOwner();
-
-        uint256 slot = slotOf(_tokenId);
-        uint256 tokenValue = balanceOf(_tokenId);
-
-        // 1. Settle all accrued yield to _from before the transfer.
-        //    This mirrors the behaviour of _beforeTransfer for regular transfers.
-        (uint256 netPayout, uint256 managementFee) = _claimYield(_tokenId, s_fromIdToPositionData[_tokenId]);
-        if (netPayout + managementFee > 0) {
-            _validateLiquidity(slot, netPayout + managementFee);
-            i_treasury.transferUsdcFromYieldClaim(netPayout, _from, slot, managementFee);
-        }
-
-        // 2. Unfreeze any frozen value on the token so the ERC3525 transfer is not blocked.
-        uint256 frozenVal = getFrozenValue(_tokenId);
-        if (frozenVal > 0) _unfreezePartialToken(_tokenId, frozenVal);
-
-        // 3. Execute the transfer bypassing compliance and freeze checks.
-        //    s_forcedTransfer is set/reset around the external call so the flag is
-        //    always cleared even if the inner call reverts.
-        s_forcedTransfer = true;
-        try this._executeForcedTransferExternal(_from, _to, _tokenId) {
-            s_forcedTransfer = false;
-        } catch {
-            s_forcedTransfer = false;
-            revert TreasuryBondToken__ForcedTransferFailed();
-        }
-
-        emit ForceTransfer(_from, _to, _tokenId, tokenValue);
-        return true;
     }
 
     /**
@@ -448,7 +459,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         //    For partial transfers, PositionData will be overwritten in _beforeTransfer with
         //    the inherited values from the source token (entryYield, entryNAV, mintTimestamp).
         s_fromIdToPositionData[_toTokenId] = PositionData({
-            entryYield: s_lastValidYieldPerSlot[_slot],
+            entryYield: s_lastValidSlotMarketData[_slot].yield,
             entryNAV: PAR,
             mintTimestamp: block.timestamp,
             lastClaimTimestamp: block.timestamp
@@ -482,7 +493,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
     ) internal {
         // Claim yield accrued on the source token before the transfer
         (uint256 netPayout, uint256 managementFee) = _claimYield(_fromTokenId, s_fromIdToPositionData[_fromTokenId]);
-        _validateLiquidity(_slot, netPayout + managementFee);
+        _validateInstantLiquidity(_slot, netPayout + managementFee);
         i_treasury.transferUsdcFromYieldClaim(netPayout, _from, _slot, managementFee);
 
         // Partial transfer (value-split): _beforeMint already wrote a default PositionData on _toTokenId.

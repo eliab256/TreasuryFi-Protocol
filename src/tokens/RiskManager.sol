@@ -1,12 +1,13 @@
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 import {TokenConstants as C} from "./TokenConstants.sol";
-import {BondYieldsResponse, ReservesResponse} from "../types.sol";
+import {BondYieldsResponse, ReservesResponse, SlotRiskParams} from "../types.sol";
 import {IBondAutomation} from "../interfaces/IBondAutomation.sol";
 import {IReservesAutomation} from "../interfaces/IReservesAutomation.sol";
 import {IBondOracle} from "../interfaces/IBondOracle.sol";
 import {IReservesOracle} from "../interfaces/IReservesOracle.sol";
 import {ITreasury} from "../interfaces/ITreasury.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 /**
  * @title RiskManager
@@ -20,6 +21,7 @@ import {ITreasury} from "../interfaces/ITreasury.sol";
  *         - functions to verify the sanity of protocol after every transaction detecting liquidity or reserves issues.
  */
 abstract contract RiskManager {
+    using SafeCast for uint256;
     error RiskManager__InvalidYield(uint256 slot, uint256 yield);
     error RiskManager__ExcessiveYieldShock(uint256 slot, uint256 shock);
     error RiskManager__ZeroAddress();
@@ -31,6 +33,12 @@ abstract contract RiskManager {
     error RiskManager__StaleOracleData();
     error RiskManager__InvalidReserve(uint256 slot, uint256 reserve);
     error RiskManager__InsufficientLiquidity(uint256 slot, uint256 availableLiquidity, uint256 requiredLiquidity);
+    error RiskManager__InsufficientReserves(uint256 slot, uint256 availableReserves, uint256 requiredReserves);
+    error RiskManager__DailyRedeemLimitExceeded(uint256 slot, uint256 requestedAmount, uint256 dailyLimit);
+    error RiskManager__RedemptionWindowClosed(uint256 slot, uint256 currentTime, uint256 windowOpen, uint256 windowClose);
+    error RiskManager__InvalidSlotParams();
+    error RiskManager__InvalidReserveBuffer();
+    error RiskManager__SlotRiskParamsNotSet(uint256 slot);
 
     event SlotFrozen(uint256 indexed slot);
     event SlotUnfrozen(uint256 indexed slot);
@@ -40,6 +48,7 @@ abstract contract RiskManager {
     event ExcessiveReserveShock(uint256 indexed slot, uint256 shock);
     event InvalidCashBuffer(uint256 indexed slot, uint256 cashBuffer);
     event ExcessiveCashBufferShock(uint256 indexed slot, uint256 shock);
+    event SlotRiskParamsUpdated(uint256 indexed slot, uint256 reserveBuffer, uint256 maxDailyRedeemBps, uint256 redeemWindowOpen, uint256 redeemWindowDuration);
 
     uint256 internal constant MAX_YIELD_SHOCK_BPS = 5 * C.PERCENTAGE_PRECISION; // 5% shock
     uint256 internal constant MAX_YIELD = 20 * C.PERCENTAGE_PRECISION; // 20% max yield for sanity checks
@@ -57,17 +66,21 @@ abstract contract RiskManager {
     uint256 internal immutable i_interval;
     uint256 internal s_lastUpkeepTriggerReserves;
     uint256 internal s_lastUpkeepTriggerYields;
+
+    struct SlotMarketData {
+        uint32 yield; // 4 decimals, e.g. 5% = 5_0000
+        uint112 reserve; 
+        uint112 cashBuffer;
+    }
+    /// @dev slot => last valid market data for the slot, used to detect shocks and freeze slots if needed
+    /// @dev used to use only 1SLOAD to get all the data for a slot
+    mapping(uint256 => SlotMarketData) internal s_lastValidSlotMarketData; 
     
-    /// @dev Mapping to track possible shocks from oracle data for each slot
-    mapping(uint256 => uint256) internal s_lastValidYieldPerSlot;
+    /// @dev Mapping to track risk parameters for each slot
+    mapping(uint256 => SlotRiskParams) internal s_slotRiskParams;
 
-    /// @dev Mapping to track possible shocks from oracle data for each slot
-    mapping(uint256 => uint256) internal s_lastValidReservePerSlot;
-
-    /// @dev Mapping to track possible shocks from oracle data for each slot
-    mapping(uint256 => uint256) internal s_lastValidCashBufferPerSlot;
-
-    /// @dev Per-slot freeze state packed into one storage slot (frozenByYields + frozenByReserves + frozen = 3 bools → 1 SLOAD)
+    /// @dev Per-slot freeze state packed into one storage slot 
+    ///      (frozenByYields + frozenByReserves + frozen = 3 bools → 1 SLOAD)
     struct SlotFreezeState {
         bool frozenByYields;
         bool frozenByReserves;
@@ -99,6 +112,46 @@ abstract contract RiskManager {
         i_treasury = ITreasury(_treasury);
         (i_interval , i_gracePeriod, ) = i_yieldsAutomation.getAllUpkeepInfo();
     }
+
+////////////////////////////////////////////////////////////////////
+////////////////////////// slot risk params //////////////////////// 
+////////////////////////////////////////////////////////////////////  
+
+    /**
+     * @notice Internal function to set the risk parameters for a slot.
+     * @dev Reverts if the provided parameters are invalid.
+     * @param _slot The slot for which to set the risk parameters.
+     * @param _params The risk parameters to set for the slot. Check types.sol
+     */
+    function _setSlotRiskParams(uint256 _slot, SlotRiskParams memory _params) internal {
+        if(_params.reserveBuffer < C.MAX_PERCENTAGE) revert RiskManager__InvalidReserveBuffer();
+        if (_params.redeemWindowOpen >= 7 days) revert RiskManager__InvalidSlotParams();
+        if (_params.redeemWindowOpen + _params.redeemWindowDuration > 7 days)
+            revert RiskManager__InvalidSlotParams();
+        s_slotRiskParams[_slot] = _params;
+        emit SlotRiskParamsUpdated(
+            _slot,
+            _params.reserveBuffer,
+            _params.maxDailyRedeem,
+            _params.redeemWindowOpen,
+            _params.redeemWindowDuration
+        );
+    }
+
+    /**
+     * @notice Internal function to check if the risk parameters for a slot are set.
+     * @dev This function must be used on a modifier to ensure that the risk parameters 
+     *      are set before allowing certain operations on a slot.
+     * @dev Reverts if the risk parameters for the given slot are not set.
+     * @param _slot The slot to check.
+     */
+    function _checkSlotRiskParamsSet(uint256 _slot) internal view {
+        SlotRiskParams memory params = s_slotRiskParams[_slot];
+        if (params.reserveBuffer == 0 ) {
+            revert RiskManager__SlotRiskParamsNotSet(_slot);
+        }
+    }
+
 
 ////////////////////////////////////////////////////////////////////
 ////////////////// manual triggers for automation ////////////////// 
@@ -295,6 +348,14 @@ abstract contract RiskManager {
                 ? cached.cashBufferUsdTotalValue
                 : newReservesResponse.cashBufferUsdTotalValue * USD8_TO_USD18,
 
+            // @audit-issue DISCREPANZA TOTALI AGGREGATI IN RAMO MIXED RESPONSE:
+            // Se 1-3 slot sono frozen, i valori per-slot frozen mantengono il valore cached (vecchio),
+            // ma totalUsdBondsValue e totalUsdPortfolioValue vengono presi da newReservesResponse
+            // (totale oracolo) che include il valore NUOVO dello slot frozen (potenzialmente anomalo).
+            // Risultato: totalUsdBondsValue != somma dei per-slot stored.
+            // Fix: ricalcolare i totali sommando i per-slot cached/new in base ai freeze flag,
+            // oppure eliminare i totali dalla struct e calcolarli on-demand dai per-slot.
+
             // total bonds value: solo se tutti frozen tieni cached, altrimenti ricalcola
             totalUsdBondsValue: (freezeSlot1 && freezeSlot2 && freezeSlot3 && freezeSlot4)
                 ? cached.totalUsdBondsValue
@@ -319,7 +380,7 @@ abstract contract RiskManager {
             emit InvalidReserve(_slot, _reserve);
             return freezeSlot;
         }
-        uint256 lastValidReserve = s_lastValidReservePerSlot[_slot];
+        uint256 lastValidReserve = s_lastValidSlotMarketData[_slot].reserve;
         if(lastValidReserve != 0) {
             uint256 delta = _reserve > lastValidReserve ? _reserve - lastValidReserve : 
             lastValidReserve - _reserve;
@@ -330,7 +391,7 @@ abstract contract RiskManager {
                 return freezeSlot;
             }
         }
-        s_lastValidReservePerSlot[_slot] = _reserve;
+        s_lastValidSlotMarketData[_slot].reserve = _reserve.toUint112();
         freezeSlot = false;
     }
 
@@ -340,7 +401,7 @@ abstract contract RiskManager {
             emit InvalidCashBuffer(_slot, _cashBuffer);
             return freezeSlot;
         }
-        uint256 lastValidCashBuffer = s_lastValidCashBufferPerSlot[_slot];
+        uint256 lastValidCashBuffer = s_lastValidSlotMarketData[_slot].cashBuffer;
         if(lastValidCashBuffer != 0) {
             uint256 delta = _cashBuffer > lastValidCashBuffer ? _cashBuffer - lastValidCashBuffer : 
             lastValidCashBuffer - _cashBuffer;
@@ -351,8 +412,19 @@ abstract contract RiskManager {
                 return freezeSlot;
             }
         }
-        s_lastValidCashBufferPerSlot[_slot] = _cashBuffer;
+        s_lastValidSlotMarketData[_slot].cashBuffer = _cashBuffer.toUint112();
         freezeSlot = false;
+    }
+
+    function _validateMintReserves(uint256 _slot, uint256 _value, uint256 _reserves, uint256 _cashBuffer, uint256 _bufferPecentage) internal view {
+        uint256 portfolioValue   = _reserves + _cashBuffer;
+        uint256 currentLiabilities = s_totalLiabilitiesPerSlot[_slot];
+        uint256 reserveBuffer    = _bufferPecentage;
+        uint256 requiredReserves = (currentLiabilities + _value) * _bufferPecentage / C.MAX_PERCENTAGE;
+
+        if (portfolioValue < requiredReserves) {
+            revert RiskManager__InsufficientReserves(_slot, portfolioValue, requiredReserves);
+        }
     }
 
     function _getTotalLiabilitiesForSlot(uint256 _slot) internal view returns (uint256) {
@@ -369,7 +441,7 @@ abstract contract RiskManager {
             emit InvalidYield(_slot, _yield);
             return freezeSlot;
         }
-        uint256 lastValidYield = s_lastValidYieldPerSlot[_slot];
+        uint256 lastValidYield = s_lastValidSlotMarketData[_slot].yield;
         if(lastValidYield != 0) {
             uint256 shock = _yield > lastValidYield ? _yield - lastValidYield : 
             lastValidYield - _yield;
@@ -379,14 +451,14 @@ abstract contract RiskManager {
                 return freezeSlot;
             }
         }
-        s_lastValidYieldPerSlot[_slot] = _yield;
+        s_lastValidSlotMarketData[_slot].yield = _yield.toUint32();
         freezeSlot = false;
     }
 
 ////////////////////////////////////////////////////////////////////
 ////////////////////// Liquidity validation //////////////////////// 
 ////////////////////////////////////////////////////////////////////  
-    function _validateLiquidity(uint256 _slot, uint256 _requiredLiquidity) internal {
+    function _validateInstantLiquidity(uint256 _slot, uint256 _requiredLiquidity) private {
         uint256 availableLiquidity = i_treasury.getTotalUsdcLiquidityPerSlot(_slot);
         if (availableLiquidity < _requiredLiquidity) {
             revert RiskManager__InsufficientLiquidity(_slot, availableLiquidity, _requiredLiquidity);
@@ -394,70 +466,88 @@ abstract contract RiskManager {
     } 
 
 ////////////////////////////////////////////////////////////////////
-/////////////////// Return oracle data confirmed /////////////////// 
+///////////////////////// Redemption window //////////////////////// 
 ////////////////////////////////////////////////////////////////////  
 
-    function _getLastValidYields(uint256 _slot) internal view returns (BondYieldsResponse memory yields){
-        // 1. Check if oracle data is not stale, to avoid using outdated data
-        if (i_yieldsOracle.isStale()) revert RiskManager__StaleOracleData();
-
-        // 2. Check if slot is frozen due to detected shock or oracle malfunction
-        if (s_slotState[_slot].frozen) revert RiskManager__SlotFrozen(_slot);
-
-        // 3. Retreive the current data from oracles
-        yields = s_lastValidYields;
+    function _validateRedemptionWindow(uint256 _slot, SlotRiskParams memory _riskParams) private view {
+        if(_riskParams.redeemWindowDuration == 0) return; // if duration is 0, redemption window is always open
+        uint256 secondsIntoWeek = block.timestamp % 7 days;
+        uint256 windowOpen = _riskParams.redeemWindowOpen;
+        uint256 windowClose = _riskParams.redeemWindowOpen + _riskParams.redeemWindowDuration;
+        if (secondsIntoWeek < windowOpen || secondsIntoWeek > windowClose) {
+            revert RiskManager__RedemptionWindowClosed(_slot, secondsIntoWeek, windowOpen, windowClose);
+        }
     }
 
-    function _getLastValidReserves(uint256 _slot) internal view returns (ReservesResponse memory reserves){
-        // 1. Check if oracle data is not stale, to avoid using outdated data
-        if (i_reservesOracle.isStale()) revert RiskManager__StaleOracleData();
+    /**
+     * @notice Internal function to get the redemption window for a slot based on its risk parameters.
+     * @dev Implement on public function on the main contract to allow external user to check the redemption window for a slot.
+     * @param _slot The slot for which to get the redemption window.
+     * @return windowOpen The timestamp when the redemption window opens.
+     * @return windowDuration The duration of the redemption window in seconds.
+     */
+    function _getNextRedemptionWindow(uint256 _slot) internal view returns (uint256 nextWindowOpen, uint256 windowDuration){
+        SlotRiskParams memory riskParams = s_slotRiskParams[_slot];
+        if(riskParams.redeemWindowDuration == 0) {
+            return (block.timestamp, 0); // if duration is 0, redemption window is always open
+        }
 
-        // 2. Check if slot is frozen due to detected shock or oracle malfunction
-        if (s_slotState[_slot].frozen) revert RiskManager__SlotFrozen(_slot);
+        uint256 secondsIntoWeek = block.timestamp % 7 days;
+        uint256 weekStart = block.timestamp - secondsIntoWeek;
 
-        // 3. Retreive the current data from oracles
-        reserves = s_lastValidReserves;
+        if (secondsIntoWeek <= riskParams.redeemWindowOpen) {
+            nextWindowOpen = weekStart + riskParams.redeemWindowOpen;
+        } else {
+            nextWindowOpen = weekStart + 7 days + riskParams.redeemWindowOpen;
+        }
     }
 
 ////////////////////////////////////////////////////////////////////
-///////////////////////// Lifecycle Hooks ////////////////////////// 
+/////////////////// Return oracle data confirmed /////////////////// 
+////////////////////////////////////////////////////////////////////  
+
+    /// @dev Lightweight safety check used by lifecycle hooks that do not need to read oracle data.
+    ///      Reverts if either oracle is stale or the slot is frozen.
+    function _checkSlotSafe(uint256 _slot) internal view {
+        if (i_yieldsOracle.isStale() || i_reservesOracle.isStale()) revert RiskManager__StaleOracleData();
+        if (s_slotState[_slot].frozen) revert RiskManager__SlotFrozen(_slot);
+    }
+
+////////////////////////////////////////////////////////////////////
+///////////////////////// Lifecycle Hooks //////////////////////////   
 ////////////////////////////////////////////////////////////////////  
 
     function _riskManagerBeforeMint(uint256 _slot, uint256 _value) internal {
+        // 1. Check staleness and freeze — no struct loaded in memory
+        _checkSlotSafe(_slot);
+        // 2. Save in memory current market data and risk params for this slot to avoid multiple SLOADs during validation
+        SlotMarketData memory marketData = s_lastValidSlotMarketData[_slot];
+        SlotRiskParams memory riskParams = s_slotRiskParams[_slot];
 
-        // 1. _getLastValidYields checks if data are stale and if slot is frozen, if not return the data struct
-        BondYieldsResponse memory yields = _getLastValidYields(_slot);
-        ReservesResponse memory reserves = _getLastValidReserves(_slot);
+        // 3. Check reserve coverage for the new position, revert if the mint would put the protocol in an undercollateralized state
+        _validateMintReserves(_slot, _value, marketData.reserve, marketData.cashBuffer, riskParams.reserveBuffer);
 
-        // 2. Check if reserves are sufficient for the new position, considering the new liabilities
-
-        // 3. Update storage
-        // 3.1 Update total liabilities for the slot
+        // 4. Update liabilities
         s_totalLiabilitiesPerSlot[_slot] += _value;
     }
 
     function _riskManagerBeforeBurn(uint256 _slot, uint256 _value) internal {
-        // 1. _getLastValidYields checks if data are stale and if slot is frozen, if not return the data struct
-        BondYieldsResponse memory yields = _getLastValidYields(_slot);
-        ReservesResponse memory reserves = _getLastValidReserves(_slot);
+        // 1. Check staleness and freeze 
+        _checkSlotSafe(_slot);
 
-        // 2. Check if liquidity is sufficient for the redemption, considering the new liabilities
+        // 2. Save in memory current market data and risk params for this slot to avoid multiple SLOADs during validation
+        SlotMarketData memory marketData = s_lastValidSlotMarketData[_slot];
+        SlotRiskParams memory riskParams = s_slotRiskParams[_slot];
 
-        // 3. Update storage
-        // 3.1 Update total liabilities for the slot
+        _validateRedemptionWindow(_slot,);
+
+        // 3. Update liabilities
         s_totalLiabilitiesPerSlot[_slot] -= _value;
     }
 
-    // claiming yield trigger before mint, attenzione
     function _riskManagerBeforeClaimingYield(uint256 _slot, uint256 _value) internal {
-        // 1. _getLastValidYields checks if data are stale and if slot is frozen, if not return the data struct
-        BondYieldsResponse memory yields = _getLastValidYields(_slot);
-        ReservesResponse memory reserves = _getLastValidReserves(_slot);
-
-        // 5. Update storage
-        // 5.1 Update total liabilities for the slot
-       
-
+        // 1. Check staleness and freeze — no struct loaded in memory
+        _checkSlotSafe(_slot);
     }
 
 

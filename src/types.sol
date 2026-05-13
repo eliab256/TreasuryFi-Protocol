@@ -61,7 +61,9 @@ struct PositionData {
  * @param reserveBuffer           The percentage of overcollateralization required for the slot, expressed as a percentage 
  *                                with base 100 (e.g. 110 means 110% collateralization). This parameter is used to calculate the 
  *                                required collateralization for positions in this slot and to trigger liquidations if the 
- *                                collateralization falls below this threshold.
+ *                                collateralization falls below this threshold. 
+ *                                Value needs 4 decimals to be consistent with percentage values
+ *                                Example: 110% = 1_100_000
  *
  * @param maxDailyRedeem          The maximum volume of USDC that can be redeemed from this slot in a single day. 
  *                                This parameter is used to limit the amount of liquidity that can be withdrawn from the
@@ -76,10 +78,10 @@ struct PositionData {
  *                                to manage liquidity and operational risk more effectively.      
  */
 struct SlotRiskParams {
-    uint256 reserveBuffer;        // % overcollateral (es. 110 = 110%), base 100
-    uint256 maxDailyRedeem;       // cap volume redeem giornaliero per slot
-    uint256 redeemWindowOpen;     // secondi dall'inizio settimana (V1 stub = 0)
-    uint256 redeemWindowDuration; // durata finestra in secondi (V1 stub = 0)
+    uint128 maxDailyRedeem;        //               16 bytes ─┐
+    uint32  redeemWindowOpen;      //                4 bytes  │ 26 bytes total = 1 storage slot
+    uint32  redeemWindowDuration;  //(V1 stub = 0)   4 bytes  │  
+    uint32  reserveBuffer;         //(V1 stub = 0)   4 bytes ─┘  
 }
 
 /**
@@ -116,3 +118,5 @@ struct TreasuryBondTokenConstructorParams {
     address feesCollector;
     address treasury;
 }
+
+

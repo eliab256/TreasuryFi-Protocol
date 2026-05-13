@@ -3,6 +3,7 @@ pragma solidity ^0.8.0;
 import {PositionData} from "../types.sol";
 import {IERC3525} from "./IERC3525.sol";
 
+// @audit-issue  verificare ereditartietà della interface
 interface ITreasuryBondToken {
     // ------ Events ------
     event PositionOpened(
