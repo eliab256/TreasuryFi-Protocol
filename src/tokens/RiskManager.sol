@@ -22,6 +22,7 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
  */
 abstract contract RiskManager {
     using SafeCast for uint256;
+
     error RiskManager__InvalidYield(uint256 slot, uint256 yield);
     error RiskManager__ExcessiveYieldShock(uint256 slot, uint256 shock);
     error RiskManager__ZeroAddress();
@@ -39,6 +40,7 @@ abstract contract RiskManager {
     error RiskManager__InvalidSlotParams();
     error RiskManager__InvalidReserveBuffer();
     error RiskManager__SlotRiskParamsNotSet(uint256 slot);
+    error RiskManager__SolvencyNotGuaranteed();
 
     event SlotFrozen(uint256 indexed slot);
     event SlotUnfrozen(uint256 indexed slot);
@@ -68,9 +70,9 @@ abstract contract RiskManager {
     uint256 internal s_lastUpkeepTriggerYields;
 
     struct SlotMarketData {
-        uint32 yield; // 4 decimals, e.g. 5% = 5_0000
-        uint112 reserve; 
-        uint112 cashBuffer;
+        uint32 yield;        // bps, e.g. 4.50% = 45000
+        uint112 reserve;     // USD 18 dec (converted from 8 dec oracle value)
+        uint112 cashBuffer;  // USD 18 dec (converted from 8 dec oracle value)
     }
     /// @dev slot => last valid market data for the slot, used to detect shocks and freeze slots if needed
     /// @dev used to use only 1SLOAD to get all the data for a slot
@@ -90,6 +92,11 @@ abstract contract RiskManager {
 
     /// @dev liabilities for each slot, updated on mint, burn and yield claim
     mapping(uint256 => uint256) private s_totalLiabilitiesPerSlot;
+
+    /// @dev daily redeem volume per slot — reset every 24h, used by _validateRedeemRateLimit
+    mapping(uint256 => uint256) internal s_dailyRedeemVolume;
+    /// @dev timestamp of the start of the current 24h redeem window per slot
+    mapping(uint256 => uint256) internal s_dailyRedeemWindowStart;
 
     // @audit-issue forse queste struct si possono eliminar e passare ad avere i mapping
     BondYieldsResponse internal s_lastValidYields;
@@ -380,10 +387,11 @@ abstract contract RiskManager {
             emit InvalidReserve(_slot, _reserve);
             return freezeSlot;
         }
+        uint256 reserve18 = _reserve * USD8_TO_USD18;
         uint256 lastValidReserve = s_lastValidSlotMarketData[_slot].reserve;
         if(lastValidReserve != 0) {
-            uint256 delta = _reserve > lastValidReserve ? _reserve - lastValidReserve : 
-            lastValidReserve - _reserve;
+            uint256 delta = reserve18 > lastValidReserve ? reserve18 - lastValidReserve : 
+            lastValidReserve - reserve18;
             uint256 shockBps = (delta * C.MAX_PERCENTAGE) / lastValidReserve;
             if (shockBps > MAX_RESERVES_SHOCK_BPS) {
                 freezeSlot = true;
@@ -391,7 +399,7 @@ abstract contract RiskManager {
                 return freezeSlot;
             }
         }
-        s_lastValidSlotMarketData[_slot].reserve = _reserve.toUint112();
+        s_lastValidSlotMarketData[_slot].reserve = reserve18.toUint112();
         freezeSlot = false;
     }
 
@@ -401,10 +409,11 @@ abstract contract RiskManager {
             emit InvalidCashBuffer(_slot, _cashBuffer);
             return freezeSlot;
         }
+        uint256 cashBuffer18 = _cashBuffer * USD8_TO_USD18;
         uint256 lastValidCashBuffer = s_lastValidSlotMarketData[_slot].cashBuffer;
         if(lastValidCashBuffer != 0) {
-            uint256 delta = _cashBuffer > lastValidCashBuffer ? _cashBuffer - lastValidCashBuffer : 
-            lastValidCashBuffer - _cashBuffer;
+            uint256 delta = cashBuffer18 > lastValidCashBuffer ? cashBuffer18 - lastValidCashBuffer : 
+            lastValidCashBuffer - cashBuffer18;
             uint256 shockBps = (delta * C.MAX_PERCENTAGE) / lastValidCashBuffer;
             if (shockBps > MAX_RESERVES_SHOCK_BPS) {
                 freezeSlot = true;
@@ -412,14 +421,13 @@ abstract contract RiskManager {
                 return freezeSlot;
             }
         }
-        s_lastValidSlotMarketData[_slot].cashBuffer = _cashBuffer.toUint112();
+        s_lastValidSlotMarketData[_slot].cashBuffer = cashBuffer18.toUint112();
         freezeSlot = false;
     }
 
     function _validateMintReserves(uint256 _slot, uint256 _value, uint256 _reserves, uint256 _cashBuffer, uint256 _bufferPecentage) internal view {
         uint256 portfolioValue   = _reserves + _cashBuffer;
         uint256 currentLiabilities = s_totalLiabilitiesPerSlot[_slot];
-        uint256 reserveBuffer    = _bufferPecentage;
         uint256 requiredReserves = (currentLiabilities + _value) * _bufferPecentage / C.MAX_PERCENTAGE;
 
         if (portfolioValue < requiredReserves) {
@@ -458,7 +466,7 @@ abstract contract RiskManager {
 ////////////////////////////////////////////////////////////////////
 ////////////////////// Liquidity validation //////////////////////// 
 ////////////////////////////////////////////////////////////////////  
-    function _validateInstantLiquidity(uint256 _slot, uint256 _requiredLiquidity) private {
+    function _validateInstantLiquidity(uint256 _slot, uint256 _requiredLiquidity) internal view {
         uint256 availableLiquidity = i_treasury.getTotalUsdcLiquidityPerSlot(_slot);
         if (availableLiquidity < _requiredLiquidity) {
             revert RiskManager__InsufficientLiquidity(_slot, availableLiquidity, _requiredLiquidity);
@@ -466,7 +474,7 @@ abstract contract RiskManager {
     } 
 
 ////////////////////////////////////////////////////////////////////
-///////////////////////// Redemption window //////////////////////// 
+//////////////////////// Redemption functions ////////////////////// 
 ////////////////////////////////////////////////////////////////////  
 
     function _validateRedemptionWindow(uint256 _slot, SlotRiskParams memory _riskParams) private view {
@@ -483,10 +491,9 @@ abstract contract RiskManager {
      * @notice Internal function to get the redemption window for a slot based on its risk parameters.
      * @dev Implement on public function on the main contract to allow external user to check the redemption window for a slot.
      * @param _slot The slot for which to get the redemption window.
-     * @return windowOpen The timestamp when the redemption window opens.
+     * @return nextWindowOpen The timestamp when the redemption window opens.
      * @return windowDuration The duration of the redemption window in seconds.
      */
-     // @audit-issue implementare public getter in main contract
     function _getNextRedemptionWindow(uint256 _slot) internal view returns (uint256 nextWindowOpen, uint256 windowDuration){
         SlotRiskParams memory riskParams = s_slotRiskParams[_slot];
         if(riskParams.redeemWindowDuration == 0) {
@@ -501,6 +508,24 @@ abstract contract RiskManager {
         } else {
             nextWindowOpen = weekStart + 7 days + riskParams.redeemWindowOpen;
         }
+    }
+
+    // @audit-issue sto facendo check su value ma dovrei farlo su usdc?
+    function _validateRedeemRateLimit(uint256 _slot, uint256 _redeemAmount, SlotRiskParams memory _riskParams) internal {
+        if (_riskParams.maxDailyRedeem == 0) return; // rate limit disabled
+
+        // Reset the 24h window if it has elapsed
+        if (block.timestamp > s_dailyRedeemWindowStart[_slot] + 1 days) {
+            s_dailyRedeemVolume[_slot] = 0;
+            s_dailyRedeemWindowStart[_slot] = block.timestamp;
+        }
+
+        uint256 newVolume = s_dailyRedeemVolume[_slot] + _redeemAmount;
+        if (newVolume > _riskParams.maxDailyRedeem) {
+            revert RiskManager__DailyRedeemLimitExceeded(_slot, _redeemAmount, _riskParams.maxDailyRedeem);
+        }
+
+        s_dailyRedeemVolume[_slot] = newVolume;
     }
 
 ////////////////////////////////////////////////////////////////////
@@ -537,10 +562,11 @@ abstract contract RiskManager {
         _checkSlotSafe(_slot);
 
         // 2. Save in memory current market data and risk params for this slot to avoid multiple SLOADs during validation
-        SlotMarketData memory marketData = s_lastValidSlotMarketData[_slot];
+        //SlotMarketData memory marketData = s_lastValidSlotMarketData[_slot];
         SlotRiskParams memory riskParams = s_slotRiskParams[_slot];
 
-        _validateRedemptionWindow(_slot,);
+        _validateRedemptionWindow(_slot,riskParams);
+        _validateRedeemRateLimit(_slot, _value, riskParams);
 
         // 3. Update liabilities
         s_totalLiabilitiesPerSlot[_slot] -= _value;
@@ -549,17 +575,19 @@ abstract contract RiskManager {
     function _riskManagerBeforeClaimingYield(uint256 _slot, uint256 _value) internal {
         // 1. Check staleness and freeze — no struct loaded in memory
         _checkSlotSafe(_slot);
+
+        s_totalLiabilitiesPerSlot[_slot] -= _value;
     }
 
     function _isSolvent() internal view returns(bool) {
         // 1. Check if reserves and liquidity buffers data are not compromised
-        if(s_slotFrozenState[C.SLOT2Y].frozenByReserves) revert RiskManager__SolvencyNotGuaranteed();
-        if(s_slotFrozenState[C.SLOT5Y].frozenByReserves) revert RiskManager__SolvencyNotGuaranteed();
-        if(s_slotFrozenState[C.SLOT10Y].frozenByReserves) revert RiskManager__SolvencyNotGuaranteed();
-        if(s_slotFrozenState[C.SLOT30Y].frozenByReserves) revert RiskManager__SolvencyNotGuaranteed();
+        if(s_slotFrozenState[C.SLOT_2Y].frozenByReserves) revert RiskManager__SolvencyNotGuaranteed();
+        if(s_slotFrozenState[C.SLOT_5Y].frozenByReserves) revert RiskManager__SolvencyNotGuaranteed();
+        if(s_slotFrozenState[C.SLOT_10Y].frozenByReserves) revert RiskManager__SolvencyNotGuaranteed();
+        if(s_slotFrozenState[C.SLOT_30Y].frozenByReserves) revert RiskManager__SolvencyNotGuaranteed();
 
         // 2. Get total usd portfolio value
-        uint256 totalPortfolio = s_lastValidReserves.totalUsdPortfolioValue * USD8_TO_USD18;
+        uint256 totalPortfolio = s_lastValidReserves.totalUsdPortfolioValue;
 
         // 3. get total liabilities
         uint256 totalLiabilities;
@@ -571,11 +599,16 @@ abstract contract RiskManager {
         return totalPortfolio >= totalLiabilities;
     }
 
+    /**
+     * @notice Internal function to assert the solvency of the protocol, used in lifecycle hooks after state changes.
+     * @dev Reverts if the protocol is not solvent, meaning that the total portfolio value is less than the total liabilities.
+     * @dev Wrapper for public function on the main contract to allow external users to check the solvency of the protocol after certain operations.
+     */    
     function _assertSolvency() internal view {
         if(!_isSolvent()) {
             revert RiskManager__SolvencyNotGuaranteed();
         }
     }
 
-
+    
 }

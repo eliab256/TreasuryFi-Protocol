@@ -660,6 +660,17 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         return _getTotalLiabilitiesForSlot(_slot);
     }
 
+    /**
+     * @notice Asserts the solvency of the protocol.
+     * @dev public wrapper for the internal _assertSolvency function in Riskmanager.
+     */
+    function assertSolvency() external view {
+        _assertSolvency();
+    }
+
+    function getNextRedemptionWindow(uint256 _slot) external view returns (uint256 nextWindowOpen, uint256 windowDuration) {
+        (nextWindowOpen, windowDuration) = _getNextRedemptionWindow(_slot);
+    }
 
     /**
      * @notice Returns the position data for a given tokenId.
