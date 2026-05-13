@@ -86,7 +86,7 @@ abstract contract RiskManager {
         bool frozenByReserves;
         bool frozen;
     }
-    mapping(uint256 => SlotFreezeState) internal s_slotState;
+    mapping(uint256 => SlotFreezeState) internal s_slotFrozenState;
 
     /// @dev liabilities for each slot, updated on mint, burn and yield claim
     mapping(uint256 => uint256) private s_totalLiabilitiesPerSlot;
@@ -205,17 +205,17 @@ abstract contract RiskManager {
 ////////////////////// freeze slots functions ////////////////////// 
 ////////////////////////////////////////////////////////////////////  
     function _setYieldsSlotFrozen(uint256 _slot, bool _frozen) private {
-        SlotFreezeState storage state = s_slotState[_slot];
-        state.frozenByYields = _frozen;
-        bool shouldBeFrozen = _frozen || state.frozenByReserves;
-        _setSlotFrozen(_slot, state, shouldBeFrozen);
+        SlotFreezeState storage frozenState = s_slotFrozenState[_slot];
+        frozenState.frozenByYields = _frozen;
+        bool shouldBeFrozen = _frozen || frozenState.frozenByReserves;
+        _setSlotFrozen(_slot, frozenState, shouldBeFrozen);
     }
 
     function _setReservesSlotFrozen(uint256 _slot, bool _frozen) private {
-        SlotFreezeState storage state = s_slotState[_slot];
-        state.frozenByReserves = _frozen;
-        bool shouldBeFrozen = _frozen || state.frozenByYields;
-        _setSlotFrozen(_slot, state, shouldBeFrozen);
+        SlotFreezeState storage frozenState = s_slotFrozenState[_slot];
+        frozenState.frozenByReserves = _frozen;
+        bool shouldBeFrozen = _frozen || frozenState.frozenByYields;
+        _setSlotFrozen(_slot, frozenState, shouldBeFrozen);
     }
 
     function _setSlotFrozen(uint256 _slot, SlotFreezeState storage state, bool _frozen) private {
@@ -231,11 +231,11 @@ abstract contract RiskManager {
      * @param _frozen The new frozen state
      */
     function _setSlotFrozenOnMainContract(uint256 _slot, bool _frozen) internal {
-        SlotFreezeState storage state = s_slotState[_slot];
-        if (state.frozen == _frozen) revert RiskManager__SlotAlreadyInState(_slot, _frozen);
-        state.frozenByYields = _frozen;
-        state.frozenByReserves = _frozen;
-        _setSlotFrozen(_slot, state, _frozen);
+        SlotFreezeState storage frozenState = s_slotFrozenState[_slot];
+        if (frozenState.frozen == _frozen) revert RiskManager__SlotAlreadyInState(_slot, _frozen);
+        frozenState.frozenByYields = _frozen;
+        frozenState.frozenByReserves = _frozen;
+        _setSlotFrozen(_slot, frozenState, _frozen);
     }
 
     function _updateYieldsValues() internal {
@@ -486,6 +486,7 @@ abstract contract RiskManager {
      * @return windowOpen The timestamp when the redemption window opens.
      * @return windowDuration The duration of the redemption window in seconds.
      */
+     // @audit-issue implementare public getter in main contract
     function _getNextRedemptionWindow(uint256 _slot) internal view returns (uint256 nextWindowOpen, uint256 windowDuration){
         SlotRiskParams memory riskParams = s_slotRiskParams[_slot];
         if(riskParams.redeemWindowDuration == 0) {
@@ -510,7 +511,7 @@ abstract contract RiskManager {
     ///      Reverts if either oracle is stale or the slot is frozen.
     function _checkSlotSafe(uint256 _slot) internal view {
         if (i_yieldsOracle.isStale() || i_reservesOracle.isStale()) revert RiskManager__StaleOracleData();
-        if (s_slotState[_slot].frozen) revert RiskManager__SlotFrozen(_slot);
+        if (s_slotFrozenState[_slot].frozen) revert RiskManager__SlotFrozen(_slot);
     }
 
 ////////////////////////////////////////////////////////////////////
@@ -548,6 +549,32 @@ abstract contract RiskManager {
     function _riskManagerBeforeClaimingYield(uint256 _slot, uint256 _value) internal {
         // 1. Check staleness and freeze — no struct loaded in memory
         _checkSlotSafe(_slot);
+    }
+
+    function _isSolvent() internal view returns(bool) {
+        // 1. Check if reserves and liquidity buffers data are not compromised
+        if(s_slotFrozenState[C.SLOT2Y].frozenByReserves) revert RiskManager__SolvencyNotGuaranteed();
+        if(s_slotFrozenState[C.SLOT5Y].frozenByReserves) revert RiskManager__SolvencyNotGuaranteed();
+        if(s_slotFrozenState[C.SLOT10Y].frozenByReserves) revert RiskManager__SolvencyNotGuaranteed();
+        if(s_slotFrozenState[C.SLOT30Y].frozenByReserves) revert RiskManager__SolvencyNotGuaranteed();
+
+        // 2. Get total usd portfolio value
+        uint256 totalPortfolio = s_lastValidReserves.totalUsdPortfolioValue * USD8_TO_USD18;
+
+        // 3. get total liabilities
+        uint256 totalLiabilities;
+        for (uint256 slot = C.SLOT_2Y; slot <= C.SLOT_30Y; slot++) {
+            totalLiabilities += s_totalLiabilitiesPerSlot[slot];
+        }
+
+        // 4. Compare total portfolio value with total liabilities
+        return totalPortfolio >= totalLiabilities;
+    }
+
+    function _assertSolvency() internal view {
+        if(!_isSolvent()) {
+            revert RiskManager__SolvencyNotGuaranteed();
+        }
     }
 
 
