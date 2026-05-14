@@ -2,9 +2,10 @@
 pragma solidity ^0.8.0;
 import {PositionData} from "../types.sol";
 import {IERC3525} from "./IERC3525.sol";
+import {IERC3643} from "./IERC3643.sol";
 
 // @audit-issue  verificare ereditartietà della interface
-interface ITreasuryBondToken {
+interface ITreasuryBondToken is IERC3643 {
     // ------ Events ------
     event PositionOpened(
         address indexed owner,
@@ -118,60 +119,17 @@ interface ITreasuryBondToken {
     // function symbol() external view returns (string memory);
     // function valueDecimals() external view returns (uint8);
 
-    // --- Compliance/Admin public functions for ERC3643 ---
-
-    /**
-     * @notice Sets the address of the IdentityRegistry contract from internal function in ERC3643 abstract contract.
-     * @dev check _setIdentityRegistry in ERC3643 for details.
-     * @param _identityRegistry The address of the IdentityRegistry contract.
-     */
-    function setIdentityRegistry(address _identityRegistry) external;
-
-    /**
-     * @notice Sets the address of the OnchainID contract from internal function in ERC3643 abstract contract.
-     * @dev check _setOnchainID in ERC3643 for details.
-     * @param _onchainID The address of the OnchainID contract.
-     */
-    function setOnchainID(address _onchainID) external;
-
-    /**
-     * @notice Sets the address of the Compliance contract from internal function in ERC3643 abstract contract.
-     * @dev check _setCompliance in ERC3643 for details.
-     * @param _compliance The address of the Compliance contract.
-     */
-    function setCompliance(address _compliance) external;
-
-    /**
-     * @notice Pauses all token transfers and operations.
-     * @dev check _pause in ERC3643 for details.
-     */
-    function pause() external;
-
-    /**
-     * @notice Unpauses all token transfers and operations.
-     * @dev check _unpause in ERC3643 for details.
-     */
-    function unpause() external;
-
-
-    function setAddressFrozen(address _userAddress, bool _freeze) external;
-    function freezePartialTokens(uint256 _tokenId, uint256 _amount) external;
-    function unfreezePartialTokens(uint256 _tokenId, uint256 _amount) external;
-    function batchSetAddressFrozen(address[] calldata _userAddresses, bool[] calldata _freeze) external;
-    function batchFreezePartialTokens(uint256[] calldata _tokenId, uint256[] calldata _amounts) external;
-    function batchUnfreezePartialTokens(uint256[] calldata _tokenId, uint256[] calldata _amounts) external;
-
-    /**
-     * @notice Forces the transfer of a token from one wallet to another on behalf of a regulatory authority.
-     * @dev Bypasses standard compliance checks (frozen sender/receiver, paused state).
-     *      The receiver must still be a verified identity in the IdentityRegistry.
-     *      Accrued yield is settled to _from before the transfer.
-     *      Any frozen value on the token is released before the transfer is executed.
-     * @param _from The current owner of the token.
-     * @param _to   The receiver of the token. Must be KYC-verified.
-     * @param _tokenId The token to transfer.
-     * @return bool true if successful.
-     */
-    function forceTransfer(address _from, address _to, uint256 _tokenId) external returns (bool);
-}
+//     /**
+//      * @notice Forces the transfer of a token from one wallet to another on behalf of a regulatory authority.
+//      * @dev Bypasses standard compliance checks (frozen sender/receiver, paused state).
+//      *      The receiver must still be a verified identity in the IdentityRegistry.
+//      *      Accrued yield is settled to _from before the transfer.
+//      *      Any frozen value on the token is released before the transfer is executed.
+//      * @param _from The current owner of the token.
+//      * @param _to   The receiver of the token. Must be KYC-verified.
+//      * @param _tokenId The token to transfer.
+//      * @return bool true if successful.
+//      */
+//     function forceTransfer(address _from, address _to, uint256 _tokenId) external returns (bool);
+ }
 

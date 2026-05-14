@@ -41,6 +41,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
     ///      the timestamp of when the position was opened.
     mapping(uint256 => PositionData) private s_fromIdToPositionData;
 
+    bytes32 public constant OWNER_ROLE = keccak256("OWNER_ROLE"); 
     bytes32 public constant FEES_MANAGER_ROLE = keccak256("FEES_MANAGER_ROLE");
     bytes32 public constant AUTOMATION_TRIGGERER_ROLE = keccak256("AUTOMATION_TRIGGERER_ROLE");
     bytes32 public constant UPDATE_RISK_MANAGER_VALUES_ROLE = keccak256("UPDATE_RISK_MANAGER_VALUES_ROLE");
@@ -115,12 +116,15 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
                 type(IReservesAutomation).interfaceId
             );
         }
+
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(OWNER_ROLE, msg.sender);
         _grantRole(FEES_MANAGER_ROLE, _params.feesCollector);
         _grantRole(AUTOMATION_TRIGGERER_ROLE, msg.sender);
         _grantRole(UPDATE_RISK_MANAGER_VALUES_ROLE, _params.updateRiskManagerAutomation);
         _grantRole(UPDATE_RISK_MANAGER_VALUES_ROLE, msg.sender);
-        i_minimumDepositAmount = 10 * (10 ** i_usdcDecimals); // 10 USDC with decimals
 
+        i_minimumDepositAmount = 10 * (10 ** i_usdcDecimals); // 10 USDC with decimals
     }
 
     function supportsInterface(
@@ -723,24 +727,25 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
 /////////////////////// ERC3643 inheritance //////////////////////// 
 ////////////////////////////////////////////////////////////////////  
 
-    function setNameAndSymbol(string calldata _name, string calldata _symbol) external onlyRole(OWNER_ROLE) {
+    /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
+    function setNameAndSymbol(string calldata _name, string calldata _symbol) external override onlyRole(OWNER_ROLE) {
         (string memory name_, string memory symbol_) = _setNameAndSymbol(_name, _symbol);
         s_name = name_;
         s_symbol = symbol_;
     }
      
-    /// @dev Inherit from ITreasuryBondToken. See interface for details.
-    function setIdentityRegistry(address _identityRegistry) public onlyRole(OWNER_ROLE) {
+    /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
+    function setIdentityRegistry(address _identityRegistry) public override onlyRole(OWNER_ROLE) {
         _setIdentityRegistry(_identityRegistry);
     }
 
-    /// @dev Inherit from ITreasuryBondToken. See interface for details.
-    function setOnchainID(address _onchainID) public onlyRole(OWNER_ROLE) {
+    /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
+    function setOnchainID(address _onchainID) public override onlyRole(OWNER_ROLE) {
         _setOnchainID(_onchainID);
     }
 
-    /// @dev Inherit from ITreasuryBondToken. See interface for details.
-    function setCompliance(address _compliance) public onlyRole(OWNER_ROLE) {
+    /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
+    function setCompliance(address _compliance) public override onlyRole(OWNER_ROLE) {
         _setCompliance(_compliance);
     }
 
@@ -777,47 +782,53 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         }
     }
 
-    /// @dev Inherit from ITreasuryBondToken. See interface for details.
-    function pause () public onlyRole(OWNER_ROLE) {
+    /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
+    function recoveryAddress( address _lostWallet, address _newWallet, address _investorOnchainID) 
+    public override onlyRole(OWNER_ROLE) returns (bool) {
+        return _recoveryAddress(_lostWallet, _newWallet, _investorOnchainID);
+    }
+
+    /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
+    function pause () public override onlyRole(OWNER_ROLE) {
         _pause();
     }
 
-    /// @dev Inherit from ITreasuryBondToken. See interface for details.
-    function unpause () public onlyRole(OWNER_ROLE) {
+    /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
+    function unpause () public override onlyRole(OWNER_ROLE) {
         _unpause();
     }
 
-    /// @dev Inherit from ITreasuryBondToken. See interface for details.
-    function setAddressFrozen(address _userAddress, bool _freeze) external onlyRole(OWNER_ROLE) {
+    /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
+    function setAddressFrozen(address _userAddress, bool _freeze) external override onlyRole(OWNER_ROLE) {
         _setAddressFrozen(_userAddress, _freeze);
     }
 
-    /// @dev Inherit from ITreasuryBondToken. See interface for details.
-    function freezePartialTokens(uint256 _tokenId, uint256 _amount) external onlyRole(OWNER_ROLE) {
+    /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
+    function freezePartialTokens(uint256 _tokenId, uint256 _amount) external override onlyRole(OWNER_ROLE) {
         _freezePartialToken(_tokenId, _amount);
     }
 
-    /// @dev Inherit from ITreasuryBondToken. See interface for details.
-    function unfreezePartialTokens(uint256 _tokenId, uint256 _amount) external onlyRole(OWNER_ROLE) {
+    /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
+    function unfreezePartialTokens(uint256 _tokenId, uint256 _amount) external override onlyRole(OWNER_ROLE) {
         _unfreezePartialToken(_tokenId, _amount);
     }
 
-    /// @dev Inherit from ITreasuryBondToken. See interface for details.
-    function batchSetAddressFrozen(address[] calldata _userAddresses, bool[] calldata _freeze) external onlyRole(OWNER_ROLE) {
+    /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
+    function batchSetAddressFrozen(address[] calldata _userAddresses, bool[] calldata _freeze) external override onlyRole(OWNER_ROLE) {
         for (uint256 i = 0; i < _userAddresses.length; i++) {
             _setAddressFrozen(_userAddresses[i], _freeze[i]);
         }
     }
 
-    /// @dev Inherit from ITreasuryBondToken. See interface for details.
-    function batchFreezePartialTokens(uint256[] calldata _tokenId, uint256[] calldata _amounts) external onlyRole(OWNER_ROLE) {
+    /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
+    function batchFreezePartialTokens(uint256[] calldata _tokenId, uint256[] calldata _amounts) external override onlyRole(OWNER_ROLE) {
         for (uint256 i = 0; i < _tokenId.length; i++) {
             _freezePartialToken(_tokenId[i], _amounts[i]);
         }
     }
 
-    /// @dev Inherit from ITreasuryBondToken. See interface for details.
-    function batchUnfreezePartialTokens(uint256[] calldata _tokenId, uint256[] calldata _amounts) external onlyRole(OWNER_ROLE) {
+    /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
+    function batchUnfreezePartialTokens(uint256[] calldata _tokenId, uint256[] calldata _amounts) external override onlyRole(OWNER_ROLE) {
         for (uint256 i = 0; i < _tokenId.length; i++) {
             _unfreezePartialToken(_tokenId[i], _amounts[i]);
         }
@@ -826,30 +837,37 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
 ////////////////////////////////////////////////////////////////////
 /////////////////// ERC3643 Getters inheritance //////////////////// 
 ////////////////////////////////////////////////////////////////////  
+    /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
     function compliance() external view  returns (IModularCompliance) {
         return s_tokenCompliance;
     }
 
+    /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
     function paused() external view returns (bool) {
         return s_tokenPaused;
     }
 
+    /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
     function onchainID() public view returns (address) {
         return s_tokenOnchainID;
     }
 
+    /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
     function version() public pure returns (string memory) {
         return TOKEN_VERSION;
     }
 
+    /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
     function getWalletFrozenStatus(address _wallet) public view returns (bool) {
         return s_frozenWallets[_wallet];
     }
 
+    /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
     function getFrozenValue(uint256 _tokenId) public view returns (uint256) {
         return s_frozenValues[_tokenId];
     }
 
+    /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
     function getAvailableValue(uint256 _tokenId) public view returns (uint256) {
         return balanceOf(_tokenId) - s_frozenValues[_tokenId];
     }

@@ -6,6 +6,7 @@ import {IIdentityRegistry} from "@t-rex/registry/interface/IIdentityRegistry.sol
 import {IModularCompliance} from "@t-rex/compliance/modular/IModularCompliance.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {IIdentity} from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
+import {IERC3643} from "../interfaces/IERC3643.sol";
 
 /**
     * @title ERC3643 base implementation for ERC3525 tokens with onchain compliance and identity registry integration
@@ -14,7 +15,7 @@ import {IIdentity} from "@onchain-id/solidity/contracts/interface/IIdentity.sol"
     *         compliance contract binding, pausing, freezing and recovery mechanisms. It is designed to be inherited 
     *         by the specific token implementations.
  */
-abstract contract ERC3643 is AccessControl {
+abstract contract ERC3643 is AccessControl, IERC3643 {
 
     // Eventi
     event IdentityRegistryAdded(address indexed identityRegistry);
@@ -61,8 +62,6 @@ abstract contract ERC3643 is AccessControl {
     /// @dev When true, bypasses pause, frozen-sender and frozen-receiver checks to allow regulatory forced transfers.
     bool internal s_forcedTransfer;
 
-    bytes32 public constant OWNER_ROLE = keccak256("OWNER_ROLE"); 
-
     /// @dev Identity Registry contract used by the onchain validator system
     IIdentityRegistry internal s_tokenIdentityRegistry;
 
@@ -86,9 +85,6 @@ abstract contract ERC3643 is AccessControl {
             revert ERC3643__ZeroAddress();
         }
         s_tokenOnchainID = _onchainID;
-
-        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _grantRole(OWNER_ROLE, msg.sender);
 
         _setIdentityRegistry(_identityRegistry);
         _setCompliance(_compliance);
@@ -121,11 +117,11 @@ abstract contract ERC3643 is AccessControl {
         emit UpdatedTokenInformation(name(), symbol(), valueDecimals(), TOKEN_VERSION, _onchainID);
     }
 
-    function recoveryAddress(
+    function _recoveryAddress(
     address _lostWallet,
     address _newWallet,
     address _investorOnchainID
-    ) external onlyRole(OWNER_ROLE) returns (bool) {
+    ) internal  returns (bool) {
         // Checks if the new wallet is different from the lost one and not already verified in the identity registry
         if (_newWallet == _lostWallet) revert ERC3643__RecoveryNotPossible();
         if (s_tokenIdentityRegistry.isVerified(_newWallet)) revert ERC3643__RecoveryNotPossible();
@@ -312,6 +308,10 @@ abstract contract ERC3643 is AccessControl {
             }
     }
 
+//////////////////////////////////////////////////////////////
+//////////////// EXTERNAL ADMIN HOOKS ////////////////////////
+//////////////////////////////////////////////////////////////
+
     /**
      * @dev balanceOf function overloaded to support both address and tokenId queries for ERC3643 and ERC3525 compatibility
      * @dev set to virtual to be overridden in the main token contract with the actual logic to return balances based on address or tokenId
@@ -325,12 +325,8 @@ abstract contract ERC3643 is AccessControl {
      * @dev set to virtual to be overridden in the main token contract with the actual logic to return balances based on address or tokenId
      */
     function balanceOf(uint256 _tokenId) public view virtual returns (uint256);
-
-
     function valueDecimals() public view virtual returns (uint8);
-
     function name() public view virtual returns (string memory);
     function symbol() public view virtual returns (string memory);
-
 
 }
