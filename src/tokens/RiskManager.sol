@@ -564,21 +564,21 @@ abstract contract RiskManager {
         // 1. Check staleness and freeze 
         _checkSlotSafe(_slot);
 
-        // 2. Save in memory current market data and risk params for this slot to avoid multiple SLOADs during validation
-        //SlotMarketData memory marketData = s_lastValidSlotMarketData[_slot];
-        SlotRiskParams memory riskParams = s_slotRiskParams[_slot];
-
-        _validateRedemptionWindow(_slot,riskParams);
-        _validateRedeemRateLimit(_slot, _value, riskParams);
-
-        // 3. Update liabilities
+        // 2. Update liabilities
         s_totalLiabilitiesPerSlot[_slot] -= _value;
     }
 
 
     function _riskManagerBeforeTransferLiquidity(uint256 _slot, uint256 _requiredLiquidity) internal {
+        // 1. Validate that the protocol has enough usdc liquidity to cover the transfer, revert if not
         _validateInstantLiquidity(_slot, _requiredLiquidity);
-        _validateRedeemRateLimit(_slot, _requiredLiquidity, s_slotRiskParams[_slot]);
+
+        // 2. Save in memory current risk params for this slot to avoid multiple SLOADs during validation
+        SlotRiskParams memory riskParams = s_slotRiskParams[_slot];
+
+        // 3. Validate that the transfer does not violate the redemption rate limit or window, revert if it does
+        _validateRedeemRateLimit(_slot, _requiredLiquidity, riskParams);
+        _validateRedemptionWindow(_slot,riskParams);
     }
 
     function _isSolvent() internal view returns(bool) {

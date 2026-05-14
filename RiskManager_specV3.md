@@ -50,9 +50,8 @@ openNewPosition()
                     ├── ERC3643._beforeValueTransfer()  [KYC, freeze wallet, pause]
                     └── _beforeMint()
                             ├── _riskManagerBeforeMint()
-                            │       ├── _getLastValidYields()   [isStale + frozen + cache]
-                            │       ├── _getLastValidReserves() [isStale + frozen + cache]
-                            │       ├── _validateMintReserves() [coverage check]  ← stub
+                            │       ├── _checkSlotSafe()          [isStale yields+reserves + frozen]
+                            │       ├── _validateMintReserves()   [coverage check]  ← stub
                             │       └── s_totalLiabilitiesPerSlot[slot] += value
                             └── init PositionData
 ```
@@ -61,22 +60,23 @@ openNewPosition()
 ```
 closePosition()
     ├── _closePositionValue()     ← calcola usdcPayout, yield, fees, NAV
-    ├── _validateInstantLiquidity()      ← check USDC on-chain Treasury  [RiskManager]
+    ├── _riskManagerBeforeTransferLiquidity()  [RiskManager]
+    │       ├── _validateInstantLiquidity()  ← check USDC on-chain Treasury
+    │       └── _validateRedeemRateLimit()    ← anti bank-run (stub V1 = no-op)
     ├── _burn()
     │       └── _beforeValueTransfer()
     │               ├── ERC3643._beforeValueTransfer()
     │               └── _beforeBurn()
     │                       ├── _riskManagerBeforeBurn()
-    │                       │       ├── _getLastValidYields()
-    │                       │       ├── _getLastValidReserves()
+    │                       │       ├── _checkSlotSafe()             [isStale + frozen]
+    │                       │       ├── _validateRedemptionWindow()  [finestra SPV]
     │                       │       └── s_totalLiabilitiesPerSlot[slot] -= value
     │                       └── delete / mantieni PositionData
     └── treasury.withdrawUsdcFromClosePosition()
 ```
 
-### Perché `_validateInstantLiquidity` è fuori dal hook
-
-Il hook `_riskManagerBeforeBurn` riceve `_value` (USD 18 dec, balance token), ma il check di liquidità richiede `usdcPayout` (USDC 6 dec, già al netto di NAV, conversione e fees). `usdcPayout` è disponibile solo in `closePosition`/`closePartialPosition` prima di `_burn`. Spostare il check nel layer pubblico è la soluzione corretta: il hook rimane responsabile di oracle + freeze + aggiornamento liabilities, il layer pubblico del check di liquidità immediata.
+> **Perché `_riskManagerBeforeTransferLiquidity` è chiamato prima del burn:**
+> Il hook `_riskManagerBeforeBurn` riceve `_value` (USD 18 dec), ma sia il check di liquidità che il rate limit operano in USDC 6 dec. `usdcPayout` è disponibile solo nel layer pubblico prima di `_burn`. Centralizzare questi check nel wrapper `_riskManagerBeforeTransferLiquidity` evita conversioni nel hook e li mantiene con le unità corrette.
 
 ---
 
@@ -129,7 +129,7 @@ Risponde a: *"lo SPV ha abbastanza patrimonio per coprire tutte le posizioni ape
 
 ```
 portfolioValue[slot] = bondsValue[slot] + cashBuffer[slot]  [USD 18 dec]
-requiredReserves     = (liabilities[slot] + mintValue) × reserveBuffer / 100
+requiredReserves     = (liabilities[slot] + mintValue) × reserveBuffer / MAX_PERCENTAGE
 
 if portfolioValue[slot] < requiredReserves → revert InsufficientReserves
 ```
@@ -153,7 +153,7 @@ Cash buffer slot 10Y (SPV):       80.000 USD
 USDC Treasury slot 10Y:           20.000 USDC
 
 Utente vuole riscattare 50.000 USDC:
-  Reserve check al mint (precedente): 1.180.000 > 1.100.000 × 110% → PASS ✅
+  Reserve check al mint (precedente): 1.180.000 > 1.100.000 × 1_100_000 / 1_000_000 → PASS ✅
   Liquidity check al burn: 20.000 < 50.000 → REVERT ❌
 
 → Non è insolvenza. Lo SPV deve chiamare injectLiquidity() con 30.000 USDC.
@@ -189,13 +189,16 @@ ReservesResponse   internal s_lastValidReserves;
 // NOTA: i valori USD in ReservesResponse sono salvati in 18 decimali
 // (convertiti da 8 dec al momento della validazione, vedi sezione 5)
 
-// ─── Shock filter ────────────────────────────────────────────────────────────
-// Ultimi valori accettati per slot — usati solo durante _updateLastValidYields/Reserves
-// NON usati nelle tx utente
+// ─── Shock filter + market data per slot ────────────────────────────────────
+// Packed in a single struct per slot — 1 SLOAD per tutte le info di mercato
+// yield in bps (es. 4.50% = 45000), reserve e cashBuffer in USD 18 dec
 
-mapping(uint256 => uint256) internal s_lastValidYieldPerSlot;    // bps
-mapping(uint256 => uint256) internal s_lastValidReservePerSlot;  // USD 8 dec (raw oracle)
-mapping(uint256 => uint256) internal s_lastValidCashBufferPerSlot; // USD 8 dec (raw oracle)
+struct SlotMarketData {
+    uint32  yield;        // bps in PERCENTAGE_PRECISION scale (es. 4.50% = 45000)
+    uint112 reserve;     // USD 18 dec (convertito da raw 8 dec al momento della validazione)
+    uint112 cashBuffer;  // USD 18 dec (convertito da raw 8 dec al momento della validazione)
+}
+mapping(uint256 => SlotMarketData) private s_lastValidSlotMarketData;
 
 // ─── Freeze state per slot ───────────────────────────────────────────────────
 // 3 bool in 1 slot di storage (1 SLOAD per leggere tutto)
@@ -205,7 +208,7 @@ struct SlotFreezeState {
     bool frozenByReserves;  // anomalia feed reserves
     bool frozen;            // risultante — unico campo letto nelle tx utente
 }
-mapping(uint256 => SlotFreezeState) internal s_slotState;
+mapping(uint256 => SlotFreezeState) internal s_slotFrozenState;
 
 // ─── Liabilities per slot ────────────────────────────────────────────────────
 // Valore totale posizioni aperte per slot, in USD 18 decimali
@@ -216,10 +219,10 @@ mapping(uint256 => uint256) private s_totalLiabilitiesPerSlot;
 // ─── Parametri di rischio per slot ──────────────────────────────────────────
 
 struct SlotRiskParams {
-    uint32 reserveBuffer;        // % overcollateral richiesta (es. 110 = 110%), base 100
-    uint128 maxDailyRedeem;       // cap USDC riscattabile in 24h per slot (V1 stub = 0 = disabilitato)
-    uint32 redeemWindowOpen;     // secondi dall'inizio settimana (V1 stub = 0)
-    uint32 redeemWindowDuration; // durata finestra in secondi   (V1 stub = 0 = sempre aperta)
+    uint32 reserveBuffer;        // overcollateral in scala PERCENTAGE_PRECISION (es. 1_120_000 = 112%), deve essere >= MAX_PERCENTAGE
+    uint128 maxDailyRedeem;      // cap USDC riscattabile in 24h per slot in USDC 6 dec (0 = disabilitato)
+    uint32 redeemWindowOpen;     // secondi dall'inizio settimana (0 = sempre aperta)
+    uint32 redeemWindowDuration; // durata finestra in secondi   (0 = sempre aperta)
 }
 mapping(uint256 => SlotRiskParams) internal s_slotRiskParams;
 
@@ -292,9 +295,9 @@ _updateYieldsValues()
             ├── Per ogni slot → _validateAndUpdateLastValidYield()
             │       ├── bounds: 0 < yield ≤ MAX_YIELD (20%)
             │       │       └── fallimento → emit InvalidYield, return true (freeze)
-            │       ├── shock: |yield - s_lastValidYieldPerSlot[slot]| ≤ MAX_YIELD_SHOCK_BPS (5%)
+            │       ├── shock: |yield - s_lastValidSlotMarketData[slot].yield| ≤ MAX_YIELD_SHOCK_BPS (5%)
             │       │       └── fallimento → emit ExcessiveYieldShock, return true (freeze)
-            │       └── successo → aggiorna s_lastValidYieldPerSlot[slot], return false
+            │       └── successo → aggiorna s_lastValidSlotMarketData[slot].yield, return false
             ├── Se tutti ok → s_lastValidYields = newResponse (aggiornamento atomico)
             └── Se almeno uno anomalo → mixed response:
                     ├── slot sani ricevono nuovo valore
@@ -305,7 +308,7 @@ _updateYieldsValues()
 
 **Formula shock yields:**
 ```
-delta    = |yield_corrente - s_lastValidYieldPerSlot[slot]|  [bps]
+delta    = |yield_corrente - s_lastValidSlotMarketData[slot].yield|  [bps]
 if delta > MAX_YIELD_SHOCK_BPS (= 50000 bps = 5%) → freeze
 ```
 
@@ -319,8 +322,8 @@ Stesso pattern di `_updateYieldsValues`. Valida due metriche per slot in sequenz
 
 **Formula shock reserves (percentuale, non assoluta):**
 ```
-delta    = |reserve_corrente - s_lastValidReservePerSlot[slot]|  [USD 8 dec raw]
-shockBps = (delta × MAX_PERCENTAGE) / s_lastValidReservePerSlot[slot]
+delta    = |reserve_corrente - s_lastValidSlotMarketData[slot].reserve|  [USD 18 dec]
+shockBps = (delta × MAX_PERCENTAGE) / s_lastValidSlotMarketData[slot].reserve
 if shockBps > MAX_RESERVES_SHOCK_BPS (= 300000 = 30%) → freeze
 ```
 
@@ -328,13 +331,12 @@ Esempio: riserva passa da 1.000.000 USD a 1.400.000 USD → delta 40% > 30% → 
 
 **Conversione a 18 dec al momento dello storage nella cache:**
 ```solidity
-// In _updateLastValidReserves, DOPO la validazione shock:
-s_lastValidReserves.twoYearUsdBondsValue = newReservesResponse.twoYearUsdBondsValue * USD8_TO_USD18;
-s_lastValidReserves.twoYearUsdCashValue  = newReservesResponse.twoYearUsdCashValue  * USD8_TO_USD18;
-// ... idem per tutti gli slot
+// In _validateAndUpdateLastValidReserve e _validateAndUpdateLastValidCashBuffer,
+// DOPO la validazione shock, i valori vengono salvati in 18 dec in SlotMarketData:
+s_lastValidSlotMarketData[slot].reserve    = newReserveValue * USD8_TO_USD18;
+s_lastValidSlotMarketData[slot].cashBuffer = newCashBufferValue * USD8_TO_USD18;
+// Il confronto shock usa anch'esso i valori in 18 dec (nessun raw 8 dec separato)
 ```
-
-I valori raw in 8 dec rimangono nei mapping `s_lastValidReservePerSlot` e `s_lastValidCashBufferPerSlot` perché servono solo per il calcolo dello shock nei cicli successivi.
 
 ### 6.4 Freeze management
 
@@ -346,17 +348,16 @@ Freeze/unfreeze manuale da admin. Imposta entrambi `frozenByYields` e `frozenByR
 
 Aggiornano il rispettivo flag e ricalcolano `frozen = frozenByYields || frozenByReserves`. Emettono `SlotFrozen` / `SlotUnfrozen` solo se `frozen` cambia effettivamente stato.
 
-### 6.5 Getter sicuri per la cache: `_getLastValidYields` / `_getLastValidReserves`
+### 6.5 Safety check centralizzato: `_checkSlotSafe`
 
 ```solidity
-function _getLastValidYields(uint256 _slot) internal view returns (BondYieldsResponse memory) {
-    if (i_yieldsOracle.isStale())     revert RiskManager__StaleOracleData();
-    if (s_slotState[_slot].frozen)    revert RiskManager__SlotFrozen(_slot);
-    return s_lastValidYields;
+function _checkSlotSafe(uint256 _slot) internal view {
+    if (i_yieldsOracle.isStale() || i_reservesOracle.isStale()) revert RiskManager__StaleOracleData();
+    if (s_slotFrozenState[_slot].frozen) revert RiskManager__SlotFrozen(_slot);
 }
 ```
 
-Stessa logica per `_getLastValidReserves`. Questi sono gli unici punti dove si controlla `isStale()` nelle tx utente — nessuna duplicazione nei lifecycle hook.
+Questo è l'unico punto dove si controlla `isStale()` e il frozen state nelle tx utente. Controlla entrambi gli oracle (yields + reserves) in un'unica chiamata. I lifecycle hook chiamano `_checkSlotSafe` invece di funzioni getter distinte per la cache — nessuna duplicazione.
 
 ### 6.6 Liquidity check: `_validateInstantLiquidity`
 
@@ -389,11 +390,10 @@ Anti-spam: revert se `block.timestamp ≤ s_lastUpkeepTrigger + i_interval + i_g
 **`_riskManagerBeforeMint(uint256 _slot, uint256 _value)`**
 ```solidity
 function _riskManagerBeforeMint(uint256 _slot, uint256 _value) internal {
-    BondYieldsResponse memory yields   = _getLastValidYields(_slot);   // isStale + frozen
-    ReservesResponse   memory reserves = _getLastValidReserves(_slot); // isStale + frozen
-
-    _validateMintReserves(_slot, _value, reserves); // stub da completare
-
+    _checkSlotSafe(_slot);  // isStale (yields + reserves) + frozen
+    SlotMarketData memory marketData = s_lastValidSlotMarketData[_slot];
+    SlotRiskParams memory riskParams = s_slotRiskParams[_slot];
+    _validateMintReserves(_slot, _value, marketData.reserve, marketData.cashBuffer, riskParams.reserveBuffer);
     s_totalLiabilitiesPerSlot[_slot] += _value;
 }
 ```
@@ -401,33 +401,41 @@ function _riskManagerBeforeMint(uint256 _slot, uint256 _value) internal {
 **`_riskManagerBeforeBurn(uint256 _slot, uint256 _value)`**
 ```solidity
 function _riskManagerBeforeBurn(uint256 _slot, uint256 _value) internal {
-    BondYieldsResponse memory yields   = _getLastValidYields(_slot);
-    ReservesResponse   memory reserves = _getLastValidReserves(_slot);
-    // Nessun liquidity check qui — vedi sezione 2 per il motivo architetturale
-
+    _checkSlotSafe(_slot);  // isStale + frozen
+    SlotRiskParams memory riskParams = s_slotRiskParams[_slot];
+    _validateRedemptionWindow(_slot, riskParams);
     s_totalLiabilitiesPerSlot[_slot] -= _value;
 }
 ```
 
-**`_riskManagerBeforeClaimingYield(uint256 _slot, uint256 _value)`**
+**`_riskManagerBeforeTransferLiquidity(uint256 _slot, uint256 _requiredLiquidity)`**
 ```solidity
-function _riskManagerBeforeClaimingYield(uint256 _slot, uint256 _value) internal {
-    BondYieldsResponse memory yields   = _getLastValidYields(_slot);
-    ReservesResponse   memory reserves = _getLastValidReserves(_slot);
-    // Nessun aggiornamento liabilities: il claim non cambia il principal
+function _riskManagerBeforeTransferLiquidity(uint256 _slot, uint256 _requiredLiquidity) internal {
+    _validateInstantLiquidity(_slot, _requiredLiquidity);
+    _validateRedeemRateLimit(_slot, _requiredLiquidity, s_slotRiskParams[_slot]);
 }
 ```
+
+Chiamato in `closePosition`, `closePartialPosition`, `claimYield` e `_beforeTransfer` (per lo yield settlato prima del transfer) con il totale USDC in uscita. Gestisce sia il check di liquidità che il rate limit in un unico punto, usando l'importo USDC corretto.
+
+> **Nota su `claimYield`:** Il calcolo dello yield è basato esclusivamente sulla `PositionData` del token (entryYield, lastClaimTimestamp), non sui dati oracle correnti. Pertanto `claimYield` non richiede `_checkSlotSafe` — lo yield può essere distribuito anche se i dati oracle sono temporaneamente non aggiornati o lo slot è frozen.
 
 ### 6.9 Configurazione parametri slot: `_setSlotRiskParams`
 
 ```solidity
 function _setSlotRiskParams(uint256 _slot, SlotRiskParams memory _params) internal {
-    if (_params.reserveBuffer < 100) revert RiskManager__InvalidSlotParams();
+    if (_params.reserveBuffer < C.MAX_PERCENTAGE) revert RiskManager__InvalidReserveBuffer(); // deve essere >= 100%
     if (_params.redeemWindowOpen >= 7 days) revert RiskManager__InvalidSlotParams();
     if (_params.redeemWindowOpen + _params.redeemWindowDuration > 7 days)
         revert RiskManager__InvalidSlotParams();
     s_slotRiskParams[_slot] = _params;
-    emit SlotRiskParamsUpdated(_slot, _params);
+    emit SlotRiskParamsUpdated(
+        _slot,
+        _params.reserveBuffer,
+        _params.maxDailyRedeem,
+        _params.redeemWindowOpen,
+        _params.redeemWindowDuration
+    );
 }
 ```
 
@@ -435,12 +443,12 @@ Chiamata nel costruttore di `TreasuryBondToken` per ogni slot. Esposta come funz
 
 **Valori consigliati al deploy:**
 
-| Slot | `reserveBuffer` | Motivazione |
-|---|---|---|
-| 2Y  | 105 | D_mod basso (1.9), T-Bill liquidi, rischio tasso minimo |
-| 5Y  | 108 | D_mod medio (4.5) |
-| 10Y | 112 | D_mod alto (8.5), sensibilità tasso significativa |
-| 30Y | 120 | D_mod massimo (18), 1% di shock tasso = 18% variazione NAV |
+| Slot | `reserveBuffer` | % effettivo | Motivazione |
+|---|---|---|---|
+| 2Y  | 1_050_000 | 105% | D_mod basso (1.9), T-Bill liquidi, rischio tasso minimo |
+| 5Y  | 1_080_000 | 108% | D_mod medio (4.5) |
+| 10Y | 1_120_000 | 112% | D_mod alto (8.5), sensibilità tasso significativa |
+| 30Y | 1_200_000 | 120% | D_mod massimo (18), 1% di shock tasso = 18% variazione NAV |
 
 ---
 
@@ -456,12 +464,12 @@ Chiamata nel costruttore di `TreasuryBondToken` per ogni slot. Esposta come funz
 | `cashBuffer[slot]` | `reserves.{slot}UsdCashValue` | USD 18 dec (già convertito in cache) |
 | `liabilities[slot]` | `s_totalLiabilitiesPerSlot[slot]` | USD 18 dec |
 | `mintValue` | parametro hook | USD 18 dec |
-| `reserveBuffer` | `s_slotRiskParams[slot].reserveBuffer` | % base 100 |
+| `reserveBuffer` | `s_slotRiskParams[slot].reserveBuffer` | scala PERCENTAGE_PRECISION (es. 1_120_000 = 112%) |
 
 **Formula:**
 ```
 portfolioValue   = bondsValue[slot] + cashBuffer[slot]
-requiredReserves = (liabilities[slot] + mintValue) × reserveBuffer / 100
+requiredReserves = (liabilities[slot] + mintValue) × reserveBuffer / MAX_PERCENTAGE
 
 if portfolioValue < requiredReserves → revert InsufficientReserves
 ```
@@ -474,9 +482,9 @@ portfolioValue    = 1.030.000e18 USD
 
 liabilities[10Y]  =   800.000e18 USD
 mintValue         =   100.000e18 USD
-reserveBuffer     = 112
+reserveBuffer     = 1_120_000  // 112% in PERCENTAGE_PRECISION
 
-requiredReserves  = (800.000 + 100.000) × 112 / 100 = 1.008.000e18 USD
+requiredReserves  = (800.000 + 100.000) × 1_120_000 / 1_000_000 = 1.008.000e18 USD
 
 1.030.000 > 1.008.000 → PASS ✅
 ```
@@ -495,23 +503,18 @@ Nuovo mint bloccato per slot 10Y fino a ricopertura riserve
 
 **Implementazione:**
 ```solidity
+// I valori reserve e cashBuffer vengono letti da SlotMarketData (USD 18 dec),
+// il bufferPercentage da SlotRiskParams (PERCENTAGE_PRECISION scale)
 function _validateMintReserves(
     uint256 _slot,
-    uint256 _mintValue,
-    ReservesResponse memory _reserves
-) private {
-    uint256 bondsValue;
-    uint256 cashValue;
-
-    if (_slot == C.SLOT_2Y)  { bondsValue = _reserves.twoYearUsdBondsValue;  cashValue = _reserves.twoYearUsdCashValue; }
-    else if (_slot == C.SLOT_5Y)  { bondsValue = _reserves.fiveYearUsdBondsValue; cashValue = _reserves.fiveYearUsdCashValue; }
-    else if (_slot == C.SLOT_10Y) { bondsValue = _reserves.tenYearUsdBondsValue;  cashValue = _reserves.tenYearUsdCashValue; }
-    else if (_slot == C.SLOT_30Y) { bondsValue = _reserves.thirtyYearUsdBondsValue; cashValue = _reserves.thirtyYearUsdCashValue; }
-
-    uint256 portfolioValue   = bondsValue + cashValue;
+    uint256 _value,
+    uint256 _reserves,        // USD 18 dec, da s_lastValidSlotMarketData[slot].reserve
+    uint256 _cashBuffer,      // USD 18 dec, da s_lastValidSlotMarketData[slot].cashBuffer
+    uint256 _bufferPercentage // PERCENTAGE_PRECISION scale, da s_slotRiskParams[slot].reserveBuffer
+) internal view {
+    uint256 portfolioValue   = _reserves + _cashBuffer;
     uint256 currentLiab      = s_totalLiabilitiesPerSlot[_slot];
-    uint256 reserveBuffer    = s_slotRiskParams[_slot].reserveBuffer;
-    uint256 requiredReserves = (currentLiab + _mintValue) * reserveBuffer / 100;
+    uint256 requiredReserves = (currentLiab + _value) * _bufferPercentage / C.MAX_PERCENTAGE;
 
     if (portfolioValue < requiredReserves) {
         revert RiskManager__InsufficientReserves(_slot, portfolioValue, requiredReserves);
@@ -551,7 +554,7 @@ function _validateRedemptionWindow(uint256 _slot) internal view {
 }
 ```
 
-**Dove viene chiamata:** in `closePosition` e `closePartialPosition` di `TreasuryBondToken`, prima di `_validateinstantLiquidity` e di `_burn`. È `view` — nessun side effect.
+**Dove viene chiamata:** dentro `_riskManagerBeforeBurn`, che viene invocato dall'hook `_beforeBurn` durante `_burn()` in `closePosition` e `closePartialPosition`. È `view` — nessun side effect.
 
 **Getter per frontend:**
 ```solidity
@@ -619,20 +622,17 @@ function closePosition(uint256 _tokenId) public nonReentrant onlyApprovedOrOwner
      uint256 earlyFee,   uint256 currentNAV)
         = _closePositionValue(_tokenId, slot, tokenBalance);
 
-    // 2. Check finestra operativa SPV [stub V1, no-op se duration == 0]
-    _validateRedemptionWindow(slot);
-
-    // 3. Check liquidità on-chain — usa il payout già calcolato
+    // 2. Check liquidità on-chain + rate limit (entrambi in USDC, nessun side effect se oracle stale)
+    //    _riskManagerBeforeTransferLiquidity chiama:  
+    //      a) _validateInstantLiquidity — view, no side effect
+    //      b) _validateRedeemRateLimit  — ⚠️ side effect: aggiorna s_dailyRedeemVolume
     uint256 totalOut = usdcPayout + netYield + earlyFee + mgmtFee;
-    _validateInstantLiquidity(slot, totalOut);
+    _riskManagerBeforeTransferLiquidity(slot, totalOut);
 
-    // 4. Rate limit [stub V1, no-op se maxDailyRedeem == 0]
-    // _validateRedeemRateLimit(slot, totalOut);
-
-    // 5. Burn — _riskManagerBeforeBurn aggiorna liabilities e verifica oracle
+    // 3. Burn — _riskManagerBeforeBurn: _checkSlotSafe + _validateRedemptionWindow + aggiorna liabilities
     _burn(_tokenId);
 
-    // 6. Pagamento
+    // 4. Pagamento
     i_treasury.withdrawUsdcFromClosePosition(usdcPayout, owner, slot, netYield, earlyFee, mgmtFee);
 
     emit PositionClosed(owner, _tokenId, slot, tokenBalance, usdcPayout, currentNAV);
@@ -648,14 +648,14 @@ constructor(TreasuryBondTokenConstructorParams memory _params)
         _params.reservesAutomation,
         _params.reservesOracle,
         _params.bondOracle,
-        _params.treasury          // ← nuovo parametro V3
+        _params.treasury
     ) { ... }
 
-// Dopo i check degli indirizzi:
-_setSlotRiskParams(C.SLOT_2Y,  SlotRiskParams({ reserveBuffer: 105, maxDailyRedeem: 0, redeemWindowOpen: 0, redeemWindowDuration: 0 }));
-_setSlotRiskParams(C.SLOT_5Y,  SlotRiskParams({ reserveBuffer: 108, maxDailyRedeem: 0, redeemWindowOpen: 0, redeemWindowDuration: 0 }));
-_setSlotRiskParams(C.SLOT_10Y, SlotRiskParams({ reserveBuffer: 112, maxDailyRedeem: 0, redeemWindowOpen: 0, redeemWindowDuration: 0 }));
-_setSlotRiskParams(C.SLOT_30Y, SlotRiskParams({ reserveBuffer: 120, maxDailyRedeem: 0, redeemWindowOpen: 0, redeemWindowDuration: 0 }));
+// Dopo i check degli indirizzi (reserveBuffer in scala PERCENTAGE_PRECISION = 10_000):
+_setSlotRiskParams(C.SLOT_2Y,  SlotRiskParams({ reserveBuffer: 1_050_000, maxDailyRedeem: 0, redeemWindowOpen: 0, redeemWindowDuration: 0 }));
+_setSlotRiskParams(C.SLOT_5Y,  SlotRiskParams({ reserveBuffer: 1_080_000, maxDailyRedeem: 0, redeemWindowOpen: 0, redeemWindowDuration: 0 }));
+_setSlotRiskParams(C.SLOT_10Y, SlotRiskParams({ reserveBuffer: 1_120_000, maxDailyRedeem: 0, redeemWindowOpen: 0, redeemWindowDuration: 0 }));
+_setSlotRiskParams(C.SLOT_30Y, SlotRiskParams({ reserveBuffer: 1_200_000, maxDailyRedeem: 0, redeemWindowOpen: 0, redeemWindowDuration: 0 }));
 ```
 
 ---

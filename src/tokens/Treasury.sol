@@ -89,7 +89,8 @@ contract Treasury is AccessControl, ITreasury {
     }
 
     /// @dev Inherited from ITreasury. See interface for details.
-    function transferUsdcFromYieldClaim(uint256 _yieldPayout, address _to, uint256 _slot, uint256 _feeOnYield) external onlyRole(WITHDRAW_ROLE) onlyValidSlot(_slot){
+    function transferUsdcFromYieldClaim(uint256 _yieldPayout, address _to, uint256 _slot, uint256 _feeOnYield) 
+        external onlyRole(TOKEN_CONTRACT_ROLE) onlyValidSlot(_slot){
         if(_yieldPayout > s_totalUsdcPerSlot[_slot]){
             revert Treasury__InsufficientLiquidity();
         }
@@ -102,7 +103,7 @@ contract Treasury is AccessControl, ITreasury {
         // 2. transfer USDC from the treasury to the user
         i_usdc.safeTransfer(_to, _yieldPayout);
         
-        // 3. emit event usdcWithdrawnFromClosePosition
+        // 3. emit event usdcWithdrawnFromClaimYield
         emit usdcWithdrawnFromClaimYield(_yieldPayout, _to, _slot);
     }
 

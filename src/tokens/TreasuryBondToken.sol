@@ -39,7 +39,6 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
     mapping(uint256 => PositionData) private s_fromIdToPositionData;
 
 
-
     modifier onlyValidSlot(uint256 slot) {
         _onlyValidSlot(slot);
         _;
