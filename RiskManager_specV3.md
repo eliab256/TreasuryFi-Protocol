@@ -338,6 +338,14 @@ s_lastValidSlotMarketData[slot].cashBuffer = newCashBufferValue * USD8_TO_USD18;
 // Il confronto shock usa anch'esso i valori in 18 dec (nessun raw 8 dec separato)
 ```
 
+**Note — Latent inconsistency in the mixed-response branch:**
+
+When 1–3 slots are frozen, `totalUsdBondsValue` and `totalUsdPortfolioValue` stored in `s_lastValidReserves` are taken from the raw oracle total (which still includes the new, potentially anomalous value for frozen slots), while the per-slot stored values for those slots are kept from cache. This means `totalUsdBondsValue ≠ sum(per-slot stored values)`.
+
+This is **not an active vulnerability** in the current codebase. `_isSolvent()` — the only consumer of `totalUsdPortfolioValue` — reverts first on the `frozenByReserves` guard when any slot is frozen, so the inconsistent total is written to storage but never read in a dangerous path.
+
+**Risk surface:** any future external getter that exposes `totalUsdBondsValue` or `totalUsdPortfolioValue` without the `frozenByReserves` guard would return a value inconsistent with the per-slot stored data. See section 6.11 for the guard that makes this safe.
+
 ### 6.4 Freeze management
 
 **`_setSlotFrozenOnMainContract(uint256 _slot, bool _frozen)`** (internal)
@@ -489,6 +497,8 @@ Formula: `steps = floor((spread − 25bps) / 25bps) + 1`, capped a `MAX_CURVE_IN
 Verifica `totalPortfolioValue >= sum(liabilities[*])` su tutti gli slot. Implementata come coppia `_isSolvent() → bool` + `_assertSolvency()` che fa revert con `RiskManager__SolvencyNotGuaranteed`.
 
 `_isSolvent` verifica prima che nessuno slot sia `frozenByReserves` (dato non affidabile → solvibilità non verificabile), poi confronta il portfolio totale con la somma delle liabilities.
+
+Questo guard ha anche un secondo effetto: rende safe la latent inconsistency descritta in sezione 6.3. In caso di mixed-response (almeno uno slot frozen), `totalUsdPortfolioValue` in `s_lastValidReserves` potrebbe essere incoerente con la somma dei per-slot stored — ma `_isSolvent` fa revert sul check `frozenByReserves` prima di leggere il totale, quindi il valore inconsistente non viene mai consumato in un path pericoloso.
 
 Esposta pubblicamente in `TreasuryBondToken` via `assertSolvency() external view`. Da chiamare su richiesta esplicita admin/monitoring off-chain — non è in nessun lifecycle hook (costo gas, già coperto dai check per-slot del `reserveBuffer`).
 

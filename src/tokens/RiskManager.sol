@@ -364,13 +364,21 @@ abstract contract RiskManager {
                 ? cached.cashBufferUsdTotalValue
                 : newReservesResponse.cashBufferUsdTotalValue * USD8_TO_USD18,
 
-            // @audit-issue DISCREPANZA TOTALI AGGREGATI IN RAMO MIXED RESPONSE:
-            // Se 1-3 slot sono frozen, i valori per-slot frozen mantengono il valore cached (vecchio),
-            // ma totalUsdBondsValue e totalUsdPortfolioValue vengono presi da newReservesResponse
-            // (totale oracolo) che include il valore NUOVO dello slot frozen (potenzialmente anomalo).
-            // Risultato: totalUsdBondsValue != somma dei per-slot stored.
-            // Fix: ricalcolare i totali sommando i per-slot cached/new in base ai freeze flag,
-            // oppure eliminare i totali dalla struct e calcolarli on-demand dai per-slot.
+            // NOTE: Latent inconsistency — aggregate totals in the mixed-response branch.
+            // When 1–3 slots are frozen, per-slot stored values for frozen slots keep the cached
+            // (old) value, while totalUsdBondsValue and totalUsdPortfolioValue are taken from
+            // newReservesResponse (oracle total), which still includes the NEW value of those
+            // frozen slots (potentially anomalous).
+            // Result: totalUsdBondsValue ≠ sum of per-slot stored values.
+            //
+            // This is NOT an active vulnerability in the current codebase:
+            // _isSolvent() — the only consumer of totalUsdPortfolioValue — always reverts first
+            // on the frozenByReserves guard when any slot is frozen, so the inconsistent total
+            // is written to storage but never read in a dangerous execution path.
+            //
+            // Risk surface: a future external getter exposing totalUsdBondsValue or
+            // totalUsdPortfolioValue without the frozenByReserves guard would return a value
+            // inconsistent with the sum of per-slot stored values.
 
             // total bonds value: solo se tutti frozen tieni cached, altrimenti ricalcola
             totalUsdBondsValue: (freezeSlot1 && freezeSlot2 && freezeSlot3 && freezeSlot4)
