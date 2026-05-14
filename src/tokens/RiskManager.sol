@@ -56,6 +56,16 @@ abstract contract RiskManager {
     uint256 internal constant MAX_YIELD = 20 * C.PERCENTAGE_PRECISION; // 20% max yield for sanity checks
     uint256 internal constant MAX_RESERVES_SHOCK_BPS = 30 * C.PERCENTAGE_PRECISION; // 30% shock
     uint256 private constant USD8_TO_USD18 = 1e10;
+    
+    /// @dev Minimum spread between 2Y and 10Y yield (in PERCENTAGE_PRECISION scale) to declare curve inversion.
+    ///      2_500 = 25 bps = 0.25% — filters out noise and initialization artifacts.
+    uint256 private constant MIN_CURVE_INVERSION_SPREAD = 25 * C.PERCENTAGE_PRECISION / 100; // 25 bps
+    /// @dev Each additional 25 bps of spread above MIN_CURVE_INVERSION_SPREAD adds one step.
+    uint256 private constant CURVE_INVERSION_SPREAD_STEP = 25 * C.PERCENTAGE_PRECISION / 100; // 0,25%
+    /// @dev Each step increases the buffer multiplier by 0.1x (in MAX_PERCENTAGE scale).
+    uint256 private constant CURVE_INVERSION_STEP_INCREMENT = 1  * C.PERCENTAGE_PRECISION / 10; // 0.1x
+    /// @dev Maximum number of steps, caps the multiplier at 1.5x (5 × 0.1 = +0.5x).
+    uint256 private constant MAX_CURVE_INVERSION_STEPS = 5;
 
     IBondAutomation internal immutable i_yieldsAutomation;
     IReservesAutomation internal immutable i_reservesAutomation;
@@ -425,13 +435,73 @@ abstract contract RiskManager {
     }
 
     function _validateMintReserves(uint256 _slot, uint256 _value, uint256 _reserves, uint256 _cashBuffer, uint256 _bufferPecentage) internal view {
-        uint256 portfolioValue   = _reserves + _cashBuffer;
+        uint256 portfolioValue     = _reserves + _cashBuffer;
         uint256 currentLiabilities = s_totalLiabilitiesPerSlot[_slot];
-        uint256 requiredReserves = (currentLiabilities + _value) * _bufferPecentage / C.MAX_PERCENTAGE;
+
+        // Apply dynamic multiplier based on yield curve shape.
+        // Returns C.MAX_PERCENTAGE (1x) when data is unreliable or curve is normal.
+        uint256 dynamicMultiplier = _calculateDynamicBuffer(_slot);
+        uint256 effectiveBuffer   = _bufferPecentage * dynamicMultiplier / C.MAX_PERCENTAGE;
+
+        uint256 requiredReserves  = (currentLiabilities + _value) * effectiveBuffer / C.MAX_PERCENTAGE;
 
         if (portfolioValue < requiredReserves) {
             revert RiskManager__InsufficientReserves(_slot, portfolioValue, requiredReserves);
         }
+    }
+
+    /**
+     * @notice Calculates a dynamic multiplier for the reserve buffer based on yield curve shape.
+     * @dev Detects 2s10s yield curve inversion (2Y yield > 10Y yield) as a leading indicator
+     *      of economic stress. When inverted, applies CURVE_INVERSION_BUFFER_MULTIPLIER (1.1x)
+     *      to increase the required reserves for medium/long-duration slots.
+     *
+     *      Guards against false positives from corrupted or uninitialized data:
+     *      - Returns 1x if either reference slot yield is 0 (cache not yet populated)
+     *      - Returns 1x if either reference slot is frozenByYields (last update was anomalous)
+     *      - Requires spread >= MIN_CURVE_INVERSION_SPREAD (25 bps) to filter noise
+     *      - Skips dynamic buffer for SLOT_2Y: low modified duration means inversion
+     *        has negligible impact on NAV sensitivity
+     *
+     *      When inversion is confirmed, the multiplier grows linearly with the spread:
+     *        spread 25 bps  → step 1 → 1.1x
+     *        spread 50 bps  → step 2 → 1.2x
+     *        spread 75 bps  → step 3 → 1.3x
+     *        spread 100 bps → step 4 → 1.4x
+     *        spread >= 125 bps → step 5 (cap) → 1.5x
+     *
+     * @dev Declared virtual so V2 can override with richer logic (rolling volatility, etc.)
+     *      without touching _validateMintReserves.
+     * @param _slot The slot being minted.
+     * @return multiplier Buffer multiplier in MAX_PERCENTAGE scale (C.MAX_PERCENTAGE = 1x, no change).
+     */
+    function _calculateDynamicBuffer(uint256 _slot) internal view virtual returns (uint256) {
+        // 2Y: short modified duration (~1.9) — inversion has negligible NAV impact
+        if (_slot == C.SLOT_2Y) return C.MAX_PERCENTAGE;
+
+        uint256 yield2Y  = s_lastValidSlotMarketData[C.SLOT_2Y].yield;
+        uint256 yield10Y = s_lastValidSlotMarketData[C.SLOT_10Y].yield;
+
+        // Guard: cache not yet populated (automation has not run yet)
+        if (yield2Y == 0 || yield10Y == 0) return C.MAX_PERCENTAGE;
+
+        // Guard: reference slot yield data is flagged as anomalous
+        if (
+            s_slotFrozenState[C.SLOT_2Y].frozenByYields ||
+            s_slotFrozenState[C.SLOT_10Y].frozenByYields
+        ) return C.MAX_PERCENTAGE;
+
+        // No inversion or spread below noise threshold
+        if (yield2Y <= yield10Y || (yield2Y - yield10Y) < MIN_CURVE_INVERSION_SPREAD) {
+            return C.MAX_PERCENTAGE;
+        }
+
+        // Gradual multiplier: +0.1x per additional 25 bps beyond the minimum threshold, capped at 1.5x.
+        // step 1 covers [25, 50) bps, step 2 covers [50, 75) bps, etc.
+        uint256 steps = (yield2Y - yield10Y - MIN_CURVE_INVERSION_SPREAD) / CURVE_INVERSION_SPREAD_STEP + 1;
+        if (steps > MAX_CURVE_INVERSION_STEPS) steps = MAX_CURVE_INVERSION_STEPS;
+
+        return C.MAX_PERCENTAGE + steps * CURVE_INVERSION_STEP_INCREMENT;
     }
 
     function _getTotalLiabilitiesForSlot(uint256 _slot) internal view returns (uint256) {

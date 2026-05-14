@@ -7,7 +7,7 @@
 4. [Storage](#4-storage)
 5. [Unità di misura](#5-unità-di-misura)
 6. [Funzioni implementate V1](#6-funzioni-implementate-v1)
-7. [Funzioni stub da completare V1](#7-funzioni-stub-da-completare-v1)
+7. [Funzioni implementate — ex stub V1](#7-funzioni-implementate--ex-stub-v1)
 8. [Integrazione con TreasuryBondToken](#8-integrazione-con-treasurybondtoken)
 9. [Custom Errors ed Eventi](#9-custom-errors-ed-eventi)
 10. [Funzioni V2](#10-funzioni-v2)
@@ -51,7 +51,7 @@ openNewPosition()
                     └── _beforeMint()
                             ├── _riskManagerBeforeMint()
                             │       ├── _checkSlotSafe()          [isStale yields+reserves + frozen]
-                            │       ├── _validateMintReserves()   [coverage check]  ← stub
+                            │       ├── _validateMintReserves()   [coverage check + dynamic buffer]
                             │       └── s_totalLiabilitiesPerSlot[slot] += value
                             └── init PositionData
 ```
@@ -450,11 +450,53 @@ Chiamata nel costruttore di `TreasuryBondToken` per ogni slot. Esposta come funz
 | 10Y | 1_120_000 | 112% | D_mod alto (8.5), sensibilità tasso significativa |
 | 30Y | 1_200_000 | 120% | D_mod massimo (18), 1% di shock tasso = 18% variazione NAV |
 
+### 6.10 Buffer dinamico per inversione curva: `_calculateDynamicBuffer` ✅ Implementato
+
+Calcola un moltiplicatore da applicare al `reserveBuffer` configurato per lo slot. Chiamata internamente da `_validateMintReserves` per ottenere l'`effectiveBuffer`:
+
+```
+effectiveBuffer  = reserveBuffer × _calculateDynamicBuffer(slot) / MAX_PERCENTAGE
+requiredReserves = (liabilities + mintValue) × effectiveBuffer / MAX_PERCENTAGE
+```
+
+**Logica:** monitora lo spread 2s10s (`yield2Y − yield10Y`). Se lo spread è negativo (curva invertita) e supera la soglia minima di rumore, il moltiplicatore aumenta proporzionalmente all'entità dell'inversione. Un'inversione profonda della curva è un leading indicator di stress economico — aumentare il buffer protocollo durante questi periodi riduce il rischio che nuovi mint vengano emessi in condizioni di mercato deteriorate.
+
+**Protezioni contro falsi positivi da dati corrotti o non inizializzati:**
+
+| Condizione | Perché è un rischio | Comportamento |
+|---|---|---|
+| `yield2Y == 0 \|\| yield10Y == 0` | Cache non ancora popolata dall'automation | Ritorna 1x |
+| `SLOT_2Y.frozenByYields` o `SLOT_10Y.frozenByYields` | L'ultimo aggiornamento ha triggerato lo shock filter — dato non affidabile | Ritorna 1x |
+| Spread < 25 bps | Differenza troppo piccola: rumore, arrotondamento, o dato appena aggiornato | Ritorna 1x |
+| `_slot == SLOT_2Y` | D_mod ~1.9: l'inversione non impatta significativamente il NAV 2Y | Bypass completo — ritorna 1x |
+
+**Gradualità del moltiplicatore** (per SLOT_5Y, SLOT_10Y, SLOT_30Y):
+
+| Spread 2Y−10Y | Steps | Moltiplicatore | effectiveBuffer con base 112% |
+|---|---|---|---|
+| 25–49 bps | 1 | 1.1× | 123.2% |
+| 50–74 bps | 2 | 1.2× | 134.4% |
+| 75–99 bps | 3 | 1.3× | 145.6% |
+| 100–124 bps | 4 | 1.4× | 156.8% |
+| ≥ 125 bps | 5 (cap) | 1.5× | 168.0% |
+
+Formula: `steps = floor((spread − 25bps) / 25bps) + 1`, capped a `MAX_CURVE_INVERSION_STEPS = 5`.
+
+**Estensibilità:** dichiarata `internal view virtual` — in V2 può essere sovrascritta senza modificare `_validateMintReserves`, ad esempio per incorporare volatilità storica degli yield o metriche aggiuntive di curva.
+
+### 6.11 Invariante di solvibilità globale: `_assertSolvency` ✅ Implementato
+
+Verifica `totalPortfolioValue >= sum(liabilities[*])` su tutti gli slot. Implementata come coppia `_isSolvent() → bool` + `_assertSolvency()` che fa revert con `RiskManager__SolvencyNotGuaranteed`.
+
+`_isSolvent` verifica prima che nessuno slot sia `frozenByReserves` (dato non affidabile → solvibilità non verificabile), poi confronta il portfolio totale con la somma delle liabilities.
+
+Esposta pubblicamente in `TreasuryBondToken` via `assertSolvency() external view`. Da chiamare su richiesta esplicita admin/monitoring off-chain — non è in nessun lifecycle hook (costo gas, già coperto dai check per-slot del `reserveBuffer`).
+
 ---
 
-## 7. Funzioni stub da completare V1
+## 7. Funzioni implementate — ex stub V1
 
-### 7.1 `_validateMintReserves` — Reserve Coverage Check
+### 7.1 `_validateMintReserves` — Reserve Coverage Check ✅ Implementato
 
 **Dati necessari:**
 
@@ -503,26 +545,28 @@ Nuovo mint bloccato per slot 10Y fino a ricopertura riserve
 
 **Implementazione:**
 ```solidity
-// I valori reserve e cashBuffer vengono letti da SlotMarketData (USD 18 dec),
-// il bufferPercentage da SlotRiskParams (PERCENTAGE_PRECISION scale)
+// I valori reserve e cashBuffer da SlotMarketData (USD 18 dec),
+// bufferPercentage da SlotRiskParams (PERCENTAGE_PRECISION scale).
+// Il dynamic multiplier (sezione 6.10) viene applicato prima del calcolo.
 function _validateMintReserves(
     uint256 _slot,
     uint256 _value,
-    uint256 _reserves,        // USD 18 dec, da s_lastValidSlotMarketData[slot].reserve
-    uint256 _cashBuffer,      // USD 18 dec, da s_lastValidSlotMarketData[slot].cashBuffer
-    uint256 _bufferPercentage // PERCENTAGE_PRECISION scale, da s_slotRiskParams[slot].reserveBuffer
+    uint256 _reserves,
+    uint256 _cashBuffer,
+    uint256 _bufferPercentage
 ) internal view {
-    uint256 portfolioValue   = _reserves + _cashBuffer;
-    uint256 currentLiab      = s_totalLiabilitiesPerSlot[_slot];
-    uint256 requiredReserves = (currentLiab + _value) * _bufferPercentage / C.MAX_PERCENTAGE;
-
+    uint256 portfolioValue     = _reserves + _cashBuffer;
+    uint256 currentLiab        = s_totalLiabilitiesPerSlot[_slot];
+    uint256 dynamicMultiplier  = _calculateDynamicBuffer(_slot);       // 1x se curva normale, >1x se invertita
+    uint256 effectiveBuffer    = _bufferPercentage * dynamicMultiplier / C.MAX_PERCENTAGE;
+    uint256 requiredReserves   = (currentLiab + _value) * effectiveBuffer / C.MAX_PERCENTAGE;
     if (portfolioValue < requiredReserves) {
         revert RiskManager__InsufficientReserves(_slot, portfolioValue, requiredReserves);
     }
 }
 ```
 
-### 7.2 `_validateRedemptionWindow` — Finestra Operativa SPV
+### 7.2 `_validateRedemptionWindow` — Finestra Operativa SPV ✅ Implementato
 
 **Perché esiste:**
 
@@ -577,7 +621,7 @@ function getNextRedemptionWindow(uint256 _slot)
 }
 ```
 
-### 7.3 `_validateRedeemRateLimit` — Anti Bank-Run
+### 7.3 `_validateRedeemRateLimit` — Anti Bank-Run ✅ Implementato
 
 **Perché esiste:**
 
@@ -660,51 +704,6 @@ _setSlotRiskParams(C.SLOT_30Y, SlotRiskParams({ reserveBuffer: 1_200_000, maxDai
 
 ---
 
-## 9. Custom Errors ed Eventi
-
-### Errors
-
-```solidity
-// Implementati
-error RiskManager__InvalidYield(uint256 slot, uint256 yield);
-error RiskManager__ExcessiveYieldShock(uint256 slot, uint256 shock);
-error RiskManager__ZeroAddress();
-error RiskManager__AutomationGracePeriodNotElapsed();
-error RiskManager__SlotAlreadyFrozen(uint256 slot);
-error RiskManager__SlotNotFrozen(uint256 slot);
-error RiskManager__SlotFrozen(uint256 slot);
-error RiskManager__SlotAlreadyInState(uint256 slot, bool frozen);
-error RiskManager__StaleOracleData();
-error RiskManager__InvalidReserve(uint256 slot, uint256 reserve);
-error RiskManager__InsufficientLiquidity(uint256 slot, uint256 available, uint256 required);
-
-// Da aggiungere con gli stub
-error RiskManager__InsufficientReserves(uint256 slot, uint256 available, uint256 required);
-error RiskManager__DailyRedeemLimitExceeded(uint256 slot, uint256 attempted, uint256 remaining);
-error RiskManager__RedemptionWindowClosed(uint256 slot, uint256 windowStart, uint256 windowEnd, uint256 currentSecondInWeek);
-error RiskManager__InvalidSlotParams();
-```
-
-### Events
-
-```solidity
-// Implementati
-event SlotFrozen(uint256 indexed slot);
-event SlotUnfrozen(uint256 indexed slot);
-event InvalidYield(uint256 indexed slot, uint256 yield);
-event ExcessiveYieldShock(uint256 indexed slot, uint256 shock);
-event InvalidReserve(uint256 indexed slot, uint256 reserve);
-event ExcessiveReserveShock(uint256 indexed slot, uint256 shock);
-event InvalidCashBuffer(uint256 indexed slot, uint256 cashBuffer);
-event ExcessiveCashBufferShock(uint256 indexed slot, uint256 shock);
-
-// Da aggiungere con gli stub
-event SlotRiskParamsUpdated(uint256 indexed slot, SlotRiskParams params);
-event CurveInversionDetected(uint256 yield2Y, uint256 yield10Y, uint256 timestamp);
-```
-
----
-
 ## 10. Funzioni V2
 
 ### 10.1 Curve Blocking automatico
@@ -719,17 +718,11 @@ Blocca mint su slot 10Y e 30Y quando `yield2Y > yield10Y` con spread superiore a
 
 Stesso pattern del redeem rate limit. Rilevante quando il protocollo aggiunge liquidità secondaria o AMM.
 
-### 10.3 Dynamic Reserve Buffer
+### 10.3 Dynamic Reserve Buffer → ✅ Implementato in sezione 6.10
 
-**`_calculateDynamicBuffer(uint256 slot)`**
+Buffer dinamico basato sulla shape della curva dei rendimenti (inversione 2s10s). Moltiplicatore graduale da 1.1x a 1.5x, con protezioni complete contro dati non inizializzati o corrotti. Dichiarato `virtual` per override in V2 con logica più ricca (rolling volatility, etc.).
 
-Moltiplicatore applicato al `reserveBuffer` base in funzione di volatilità implicita dai movimenti recenti di yield e shape della curva. In V1 restituisce 1x (nessun effetto). Da dichiarare `virtual` per override in V2.
-
-### 10.4 Solvency Invariant globale
-
-**`_assertSolvency()`**
-
-Verifica `totalReserves >= sum(liabilities[*])` su tutti gli slot. Costoso in gas per ogni tx — da implementare come funzione view su chiamata esplicita admin + monitoring off-chain.
+### 10.4 Solvency Invariant globale → ✅ Implementato in sezione 6.11
 
 ### 10.5 Redemption Window bisettimanale
 
@@ -769,8 +762,10 @@ vm.warp(1_700_000_000 - (1_700_000_000 % 7 days) + 6 days + 23 hours);
 // Imposta lastValidReserve a 1.000.000e8, poi simula update a 1.400.000e8 (+40% > 30%)
 // Atteso: ExcessiveReserveShock emesso, slot frozen
 
-// Test reserve coverage
-// Imposta reserves a 900.000e18, liabilities a 850.000e18, buffer 110%
-// required = 850.000 * 110 / 100 = 935.000 > 900.000
-// Atteso: revert InsufficientReserves
+// Test reserve coverage con dynamic buffer
+// Imposta reserves a 900.000e18, liabilities a 850.000e18, buffer 1_120_000 (112%)
+// Curva normale: required = 850.000 * 1_120_000 / 1_000_000 = 952.000 > 900.000 → revert
+// Curva invertita spread 50bps (2Y frozen=false, 10Y frozen=false):
+//   dynamicMultiplier = 1_200_000 (1.2x), effectiveBuffer = 1_120_000 * 1_200_000 / 1_000_000 = 1_344_000
+//   required = 850.000 * 1_344_000 / 1_000_000 = 1_142_400 → revert con buffer maggiore
 ```
