@@ -3,9 +3,8 @@ pragma solidity ^0.8.0;
 import {TokenConstants as C} from "./TokenConstants.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import { AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
+import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-
 
 abstract contract UsdcUsdConverter {
     error UsdcUsdConverter__UsdcPriceFeedNotAvailable();
@@ -219,7 +218,12 @@ abstract contract UsdcUsdConverter {
         }
     }
 
-    function _getLatestUsdcPrice() internal view returns (uint256) {
+    /**
+     * @notice Retrieves the latest USDC price from the price feed.
+     * @dev Reverts if the price feed returns a non-positive value, if the round is stale, or if the price is outdated.
+     * @return The latest USDC price.
+     */
+    function _getLatestUsdcPrice() private view returns (uint256) {
         (
             uint80 roundId,
             int256 answer,

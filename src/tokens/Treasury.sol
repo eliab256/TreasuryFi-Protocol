@@ -18,8 +18,9 @@ contract Treasury is AccessControl, ITreasury {
     using SafeCast for uint256;
     using SafeERC20 for IERC20;
 
-    bytes32 public constant WITHDRAW_ROLE = keccak256("WITHDRAW_ROLE");
-    bytes32 public constant DEPOSIT_ROLE = keccak256("DEPOSIT_ROLE");
+    bytes32 public constant TOKEN_CONTRACT_ROLE = keccak256("TOKEN_CONTRACT_ROLE");
+    bytes32 public constant FEES_COLLECTOR_ROLE = keccak256("FEES_COLLECTOR_ROLE");
+    bytes32 public constant LIQUIDITY_DEPOSITOR_ROLE = keccak256("LIQUIDITY_DEPOSITOR_ROLE");
     address private immutable i_treasuryBondToken;
     IERC20 private immutable i_usdc;
     
@@ -41,18 +42,19 @@ contract Treasury is AccessControl, ITreasury {
         _;
     }
 
-    constructor(address _treasuryBondToken, address _usdc) {
+    constructor(address _treasuryBondToken, address _usdc, address _feeCollector, address _liquidityDepositor) {
         i_treasuryBondToken = _treasuryBondToken;
         i_usdc = IERC20(_usdc);
         _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _setupRole(WITHDRAW_ROLE, _treasuryBondToken);
-        _setupRole(DEPOSIT_ROLE, _treasuryBondToken);
+        _setupRole(TOKEN_CONTRACT_ROLE, _treasuryBondToken);
+        _setupRole(FEES_COLLECTOR_ROLE, _feeCollector);
+        _setupRole(LIQUIDITY_DEPOSITOR_ROLE, _liquidityDepositor);
     }
 
     /// @dev Inherited from ITreasury. See interface for details.
     function depositUsdcFromOpenNewPosition(
         uint256 _amount, address _from, uint256 _slot, uint256 _feeAmount
-        ) external onlyRole(DEPOSIT_ROLE) onlyValidSlot(_slot){
+        ) external onlyRole(TOKEN_CONTRACT_ROLE) onlyValidSlot(_slot){
         // 1. update accounting 
         uint256 totalAmount = _amount + _feeAmount;
         s_totalUsdcPerSlot[_slot] += totalAmount;
@@ -66,7 +68,7 @@ contract Treasury is AccessControl, ITreasury {
 
     /// @dev Inherited from ITreasury. See interface for details.
     function withdrawUsdcFromClosePosition(uint256 _usdcPayout, address _to, uint256 _slot,uint256 _yieldPayout, uint256 _exitFee, uint256 _managementFee) 
-        external onlyRole(WITHDRAW_ROLE) onlyValidSlot(_slot){
+        external onlyRole(TOKEN_CONTRACT_ROLE) onlyValidSlot(_slot){
         // 1. get total payout
         uint256 totalPayout = _usdcPayout + _yieldPayout;
 
@@ -105,7 +107,7 @@ contract Treasury is AccessControl, ITreasury {
     }
 
     /// @dev Inherited from ITreasury. See interface for details.
-    function useFeesCollectedToInjectLiquidity(uint256 _amount, uint256 _slot) external onlyRole(DEPOSIT_ROLE) onlyValidSlot(_slot){
+    function useFeesCollectedToInjectLiquidity(uint256 _amount, uint256 _slot) external onlyRole(FEES_COLLECTOR_ROLE) onlyValidSlot(_slot){
         if(_amount == type(uint256).max){
             _amount = s_totalFeesToBeCollected;
         }
@@ -125,7 +127,7 @@ contract Treasury is AccessControl, ITreasury {
     }
 
     /// @dev Inherited from ITreasury. See interface for details.
-    function collectFees(uint256 _amount, address _to) external onlyRole(DEPOSIT_ROLE){
+    function collectFees(uint256 _amount, address _to) external onlyRole(FEES_COLLECTOR_ROLE){
         if(_amount > s_totalFeesToBeCollected){
             revert Treasury__AmountExceedsTotalFeesToBeCollected();
         }
@@ -137,7 +139,7 @@ contract Treasury is AccessControl, ITreasury {
     }
 
     /// @dev Inherited from ITreasury. See interface for details.
-    function injectLiquidity(uint256 _amount, uint256 _slot) external onlyRole(DEPOSIT_ROLE) onlyValidSlot(_slot){
+    function injectLiquidity(uint256 _amount, uint256 _slot) external onlyRole(LIQUIDITY_DEPOSITOR_ROLE) onlyValidSlot(_slot){
         // 1. update accounting 
         s_totalUsdcPerSlot[_slot] += _amount;
 
@@ -149,7 +151,7 @@ contract Treasury is AccessControl, ITreasury {
     }
 
     /// @dev Inherited from ITreasury. See interface for details.
-    function injectLiquidityOnMultipleSlots(uint256[] calldata _amounts, uint256[] calldata _slots) external onlyRole(DEPOSIT_ROLE){
+    function injectLiquidityOnMultipleSlots(uint256[] calldata _amounts, uint256[] calldata _slots) external onlyRole(LIQUIDITY_DEPOSITOR_ROLE){
         uint256 amountsLength = _amounts.length;
         uint256 slotsLength = _slots.length;
         if(amountsLength != 4 || slotsLength != 4){

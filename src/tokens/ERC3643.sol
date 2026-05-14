@@ -4,7 +4,6 @@ pragma solidity ^0.8.0;
 
 import {IIdentityRegistry} from "@t-rex/registry/interface/IIdentityRegistry.sol";
 import {IModularCompliance} from "@t-rex/compliance/modular/IModularCompliance.sol";
-import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {IIdentity} from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
 import {IERC3643} from "../interfaces/IERC3643.sol";
 
@@ -15,47 +14,15 @@ import {IERC3643} from "../interfaces/IERC3643.sol";
     *         compliance contract binding, pausing, freezing and recovery mechanisms. It is designed to be inherited 
     *         by the specific token implementations.
  */
-abstract contract ERC3643 is AccessControl, IERC3643 {
+abstract contract ERC3643 is IERC3643 {
 
-    // @audit-issue spsostare access control in TreasuryBondToken? 
      bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
      bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
      bytes32 public constant FREEZER_ROLE = keccak256("FREEZER_ROLE");
      bytes32 public constant RECOVERY_ROLE = keccak256("RECOVERY_ROLE");
-     bytes32 public constant COMPLIANCE_MANAGER_ROLE = keccak256("COMPLIANCE_MANAGER_ROLE");
-    // Eventi
-    event IdentityRegistryAdded(address indexed identityRegistry);
-    event AddressFrozen(address indexed wallet, bool indexed frozen, address indexed owner);
-    event TokenValueFrozen(uint256 indexed tokenId, uint256 amount);
-    event TokenValueUnfrozen(uint256 indexed tokenId, uint256 amount);
-    event ComplianceAdded(address indexed compliance);
-    event Paused(address indexed account); 
-    event Unpaused(address indexed account); 
-    event UpdatedTokenInformation(string name, string symbol, uint8 decimals, string version, address onchainID); 
-    event RecoverySuccess(address indexed lostWallet, address indexed newWallet, address indexed investorOnchainID);
-
-
-    // Custom error
-    error ERC3643__InvalidName();
-    error ERC3643__InvalidSymbol();
-    error ERC3643__InvalidDecimals();
-    error ERC3643__ZeroAddress();
-    error ERC3643__TokenPaused();
-    error ERC3643__TokenNotPaused();
-    error ERC3643__AmountExceedsAvailableValue();
-    error ERC3643__AmountExceedsAvailableFrozen();
-    error ERC3643__NoTokensToRecover();
-    error ERC3643__RecoveryNotPossible();
-    error ERC3643__SenderNotVerified();
-    error ERC3643__ReceiverNotVerified();
-    error ERC3643__SenderFrozen();
-    error ERC3643__ReceiverFrozen();
-
 
     /// @dev Token information
     /// @dev  decimals inherit from erc3525
-    // string internal s_name;
-    // string internal s_symbol;
     address internal s_tokenOnchainID;
     bool internal s_tokenPaused = false;
     string internal constant TOKEN_VERSION = "4.1.3";

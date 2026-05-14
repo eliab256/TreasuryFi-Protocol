@@ -5,7 +5,7 @@ import {IERC3525} from "./IERC3525.sol";
 import {IERC3643} from "./IERC3643.sol";
 
 // @audit-issue  verificare ereditartietà della interface
-interface ITreasuryBondToken is IERC3643 {
+interface ITreasuryBondToken is IERC3643 /*, IERC3525 */ {
     // ------ Events ------
     event PositionOpened(
         address indexed owner,
@@ -34,26 +34,15 @@ interface ITreasuryBondToken is IERC3643 {
     );
     event YieldClaimed(address indexed user, uint256 indexed tokenId, uint256 yieldAmount, uint256 feeCollected);
     event ForceTransfer(address indexed from, address indexed to, uint256 indexed tokenId, uint256 value);
-    event EntryFeeCollected(address indexed user, uint256 amount);
-    event ExitFeeCollected(address indexed user, uint256 amount);
-    event YieldFeeCollected(address indexed user, uint256 amount);
-    event IdentityRegistrySet(address indexed identityRegistry);
 
     // ------ Errors ------
     error TreasuryBondToken__InvalidSlot();
     error TreasuryBondToken__FunctionDisabled();
-    error TreasuryBondToken__NotApprovedOrOwner();
     error TreasuryBondToken__EtherNotAccepted();
     error TreasuryBondToken__InvalidValue();
     error TreasuryBondToken__ZeroAddress();
     error TreasuryBondToken__InvalidOracle(address oracle, bytes4 interfaceId);
     error TreasuryBondToken__InvalidAutomation(address automation, bytes4 interfaceId);
-    error TreasuryBondToken__SenderNotVerified();
-    error TreasuryBondToken__ReceiverNotVerified();
-    error TreasuryBondToken__WalletAlreadyFrozen();
-    error TreasuryBondToken__WalletNotFrozen();
-    error TreasuryBondToken__AmountExceedsAvailableBalance();
-    error TreasuryBondToken__AmountShouldBeLessOrEqualToFrozen();
     error TreasuryBondToken__LockPeriodNotElapsed();
     error TreasuryBondToken__InvalidTokenOwner();
     error TreasuryBondToken__ForcedTransferFailed();
@@ -119,17 +108,17 @@ interface ITreasuryBondToken is IERC3643 {
     // function symbol() external view returns (string memory);
     // function valueDecimals() external view returns (uint8);
 
-//     /**
-//      * @notice Forces the transfer of a token from one wallet to another on behalf of a regulatory authority.
-//      * @dev Bypasses standard compliance checks (frozen sender/receiver, paused state).
-//      *      The receiver must still be a verified identity in the IdentityRegistry.
-//      *      Accrued yield is settled to _from before the transfer.
-//      *      Any frozen value on the token is released before the transfer is executed.
-//      * @param _from The current owner of the token.
-//      * @param _to   The receiver of the token. Must be KYC-verified.
-//      * @param _tokenId The token to transfer.
-//      * @return bool true if successful.
-//      */
-//     function forceTransfer(address _from, address _to, uint256 _tokenId) external returns (bool);
+    /**
+     * @notice Forces the transfer of a token from one wallet to another on behalf of a regulatory authority.
+     * @dev Bypasses standard compliance checks (frozen sender/receiver, paused state).
+     *      The receiver must still be a verified identity in the IdentityRegistry.
+     *      Accrued yield is settled to _from before the transfer.
+     *      Any frozen value on the token is released before the transfer is executed.
+     * @param _from The current owner of the token.
+     * @param _to   The receiver of the token. Must be KYC-verified.
+     * @param _tokenId The token to transfer.
+     * @return bool true if successful.
+     */
+    function forceTransfer(address _from, address _to, uint256 _tokenId) external returns (bool);
  }
 

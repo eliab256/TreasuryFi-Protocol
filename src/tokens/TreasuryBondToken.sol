@@ -21,19 +21,16 @@ import {ITreasuryBondToken} from "../interfaces/ITreasuryBondToken.sol";
 
 /**
  * @title TreasuryBondToken
- * @notice ERC-3525 token representing fractionalized positions in US Treasury bonds.
+ * @notice ERC-3525 token representing fractionalized positions in US Treasury bond buckets.
  * Each slot corresponds to a different bond maturity (2Y, 5Y, 10Y, 30Y).
  * Users can open new positions by depositing USDC and minting tokens, or close positions by burning tokens and withdrawing USDC.
  * The contract includes role-based access control for fee management and administrative functions.
  */
-contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager, UsdcUsdConverter, ReentrancyGuard{
-
-    /// @dev constant unit value to calculate NAV.
-    uint256 internal constant PAR = 1e18; 
-
-    uint256 internal constant PERCENTAGE_YIELD_FEE = 20 * C.PERCENTAGE_PRECISION; // 20% fee on yield
-    uint256 internal constant PERCENTAGE_ENTRY_FEE = 2 * C.PERCENTAGE_PRECISION / 10; // 0,2% fee on entry
-    uint256 internal constant PERCENTAGE_EXIT_FEE_MAX = 5 * C.PERCENTAGE_PRECISION ; // 5% fee on exit
+contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager, UsdcUsdConverter, ReentrancyGuard, AccessControl{
+    bytes32 public constant OWNER_ROLE = keccak256("OWNER_ROLE"); 
+    bytes32 public constant FEES_MANAGER_ROLE = keccak256("FEES_MANAGER_ROLE");
+    bytes32 public constant AUTOMATION_TRIGGERER_ROLE = keccak256("AUTOMATION_TRIGGERER_ROLE");
+    bytes32 public constant UPDATE_RISK_MANAGER_VALUES_ROLE = keccak256("UPDATE_RISK_MANAGER_VALUES_ROLE");
 
     uint256 private immutable i_minimumDepositAmount; // 10 USDC
 
@@ -41,10 +38,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
     ///      the timestamp of when the position was opened.
     mapping(uint256 => PositionData) private s_fromIdToPositionData;
 
-    bytes32 public constant OWNER_ROLE = keccak256("OWNER_ROLE"); 
-    bytes32 public constant FEES_MANAGER_ROLE = keccak256("FEES_MANAGER_ROLE");
-    bytes32 public constant AUTOMATION_TRIGGERER_ROLE = keccak256("AUTOMATION_TRIGGERER_ROLE");
-    bytes32 public constant UPDATE_RISK_MANAGER_VALUES_ROLE = keccak256("UPDATE_RISK_MANAGER_VALUES_ROLE");
+
 
     modifier onlyValidSlot(uint256 slot) {
         _onlyValidSlot(slot);
@@ -186,7 +180,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         uint256 newTokenId = _mint(_mintTo, _slot, netAmountInUsd);
         
         // 5. emit event newPositionOpened
-        emit PositionOpened(_mintTo, newTokenId, _slot, _value, netAmountInUsd, PAR);
+        emit PositionOpened(_mintTo, newTokenId, _slot, _value, netAmountInUsd, C.PAR);
     }
 
     /// @dev Inherit from ITreasuryBondToken. See interface for details.
@@ -257,51 +251,6 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
 
         emit ForceTransfer(_from, _to, _tokenId, tokenValue);
         return true;
-    }
-
-    /**
-     * @notice Internal function to calculate the current Net Asset Value (NAV) for a given position.
-     * @dev Formula (yield rose):   NAV = PAR * (MAX_PERCENTAGE - D_mod * (currentYield - entryYield) / PERCENTAGE_PRECISION) / MAX_PERCENTAGE
-     *      Formula (yield fell):   NAV = PAR * (MAX_PERCENTAGE + D_mod * (entryYield - currentYield) / PERCENTAGE_PRECISION) / MAX_PERCENTAGE
-     *      Where D_mod is the duration modifier for the slot, acting as price sensitivity to yield changes.
-     *      If the discount reaches or exceeds 100%, NAV is capped at 0.
-     * @param _entryYield The yield at the time the position was opened.
-     * @param _currentYield The current yield for the slot.
-     * @param _slot The slot identifier for the position.
-     * @return currentNAV The calculated current NAV for the position.
-     */
-    function _calculateCurrentNAV(uint256 _entryYield, uint256 _currentYield, uint256 _slot) internal pure returns (uint256 currentNAV) {
-        uint256 D_mod = _getDmodForSlot(_slot);
-        currentNAV = YieldsMath.calculateCurrentNAV(PAR, _entryYield, _currentYield, D_mod);
-    }
-
-    function _closePositionValue(
-        uint256 _tokenId,
-        uint256 _slot,
-        uint256 _valueToBurn
-    ) internal returns (uint256 usdcPayout, uint256 netYieldToClaimInUsdc, uint256 managmentFeeInUsdc, uint256 earlyRedeemFeeUsdc, uint256 currentNAV){
-        // 1. Get the current yield for the slot 
-        (uint256 currentYield, , ) = _getMarketDataForSlot(_slot);
-
-        // 2. get position data
-        PositionData memory posData = s_fromIdToPositionData[_tokenId];
-
-        // 3. accrue all pending interests until now (in USDC)
-        (netYieldToClaimInUsdc, managmentFeeInUsdc) = _claimYield(_tokenId, posData);
-
-        // 4. Calculate the current NAV based on the entry yield and current yield  
-        currentNAV = _calculateCurrentNAV(posData.entryYield, currentYield, _slot);
-        uint256 usdPayoutBeforeFees = (_valueToBurn * currentNAV) / PAR;
-
-        // 5. Convert payout and fees from USD with 18 decimals to USDC with 6 decimals
-        uint256 usdcPayoutBeforeFees = _convertUsd18ToUsdc(usdPayoutBeforeFees);
-
-        // 6. Calculate early redeem fee if the position is closed before the penalty period for that slot
-        earlyRedeemFeeUsdc = _calculateEarlyRedeemFee(posData.mintTimestamp, usdcPayoutBeforeFees, _slot);
-        
-        // 7. Returns parameter to call treasury withdraw function 
-        usdcPayout = usdcPayoutBeforeFees - earlyRedeemFeeUsdc;
-        return (usdcPayout, netYieldToClaimInUsdc, managmentFeeInUsdc , earlyRedeemFeeUsdc, currentNAV);
     }
 
     /**
@@ -387,11 +336,71 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         // 6. call treasury to transfer USDC to the user, this call will also update the treasury 
         //    accounting and emit the event usdcWithdrawnFromClaimYield 
         i_treasury.transferUsdcFromYieldClaim(netPayout , msg.sender, slot, managmentFee);
+
+        // emit event yield claimed
+        emit YieldClaimed(msg.sender, _tokenId, netPayout + managmentFee, managmentFee);
     }
 
 ////////////////////////////////////////////////////////////////////
 //////////////////////// Internal functions //////////////////////// 
 ////////////////////////////////////////////////////////////////////  
+
+    /**
+     * @notice Internal function to calculate the current Net Asset Value (NAV) for a given position.
+     * @dev Formula (yield rose):   NAV = PAR * (MAX_PERCENTAGE - D_mod * (currentYield - entryYield) / PERCENTAGE_PRECISION) / MAX_PERCENTAGE
+     *      Formula (yield fell):   NAV = PAR * (MAX_PERCENTAGE + D_mod * (entryYield - currentYield) / PERCENTAGE_PRECISION) / MAX_PERCENTAGE
+     *      Where D_mod is the duration modifier for the slot, acting as price sensitivity to yield changes.
+     *      If the discount reaches or exceeds 100%, NAV is capped at 0.
+     * @param _entryYield The yield at the time the position was opened.
+     * @param _currentYield The current yield for the slot.
+     * @param _slot The slot identifier for the position.
+     * @return currentNAV The calculated current NAV for the position.
+     */
+    function _calculateCurrentNAV(uint256 _entryYield, uint256 _currentYield, uint256 _slot) internal pure returns (uint256 currentNAV) {
+        uint256 D_mod = _getDmodForSlot(_slot);
+        currentNAV = YieldsMath.calculateCurrentNAV(C.PAR, _entryYield, _currentYield, D_mod);
+    }
+
+    /**
+     * @notice Internal function to close a position and calculate the payout values. 
+     * @dev Manage both full and partial position closures by calculating the payout proportionally to the value being burned.
+     * @param _tokenId The ID of the token representing the position.
+     * @param _slot The slot identifier for the position.
+     * @param _valueToBurn The value of the position to burn.
+     * @return usdcPayout The USDC payout after fees.
+     * @return netYieldToClaimInUsdc The net yield to claim in USDC.
+     * @return managmentFeeInUsdc The management fee in USDC.
+     * @return earlyRedeemFeeUsdc The early redeem fee in USDC.
+     * @return currentNAV The current Net Asset Value (NAV) of the position.
+     */
+    function _closePositionValue(
+        uint256 _tokenId,
+        uint256 _slot,
+        uint256 _valueToBurn
+        ) internal returns (uint256 usdcPayout, uint256 netYieldToClaimInUsdc, uint256 managmentFeeInUsdc, uint256 earlyRedeemFeeUsdc, uint256 currentNAV){
+        // 1. Get the current yield for the slot 
+        (uint256 currentYield, , ) = _getMarketDataForSlot(_slot);
+
+        // 2. get position data
+        PositionData memory posData = s_fromIdToPositionData[_tokenId];
+
+        // 3. accrue all pending interests until now (in USDC)
+        (netYieldToClaimInUsdc, managmentFeeInUsdc) = _claimYield(_tokenId, posData);
+
+        // 4. Calculate the current NAV based on the entry yield and current yield  
+        currentNAV = _calculateCurrentNAV(posData.entryYield, currentYield, _slot);
+        uint256 usdPayoutBeforeFees = (_valueToBurn * currentNAV) / C.PAR;
+
+        // 5. Convert payout and fees from USD with 18 decimals to USDC with 6 decimals
+        uint256 usdcPayoutBeforeFees = _convertUsd18ToUsdc(usdPayoutBeforeFees);
+
+        // 6. Calculate early redeem fee if the position is closed before the penalty period for that slot
+        earlyRedeemFeeUsdc = _calculateEarlyRedeemFee(posData.mintTimestamp, usdcPayoutBeforeFees, _slot);
+        
+        // 7. Returns parameter to call treasury withdraw function 
+        usdcPayout = usdcPayoutBeforeFees - earlyRedeemFeeUsdc;
+        return (usdcPayout, netYieldToClaimInUsdc, managmentFeeInUsdc , earlyRedeemFeeUsdc, currentNAV);
+    }
 
     /**
      * @notice Internal function to calculate and transfer accrued yield to the user before any value change (transfer, burn).
@@ -404,12 +413,12 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         // 1.  Get balance of token
         uint256 value = balanceOf(_tokenId);
         // questa funzione viene usata anche durante i transfer 
-        uint256 principalUsd = YieldsMath.calculatePrincipalUsd(value , positionData.entryNAV, PAR);
+        uint256 principalUsd = YieldsMath.calculatePrincipalUsd(value , positionData.entryNAV, C.PAR);
         uint256 elapsedTime = block.timestamp - positionData.lastClaimTimestamp;
         uint256 grossAccrued = principalUsd * positionData.entryYield * elapsedTime / (365 days * C.PERCENTAGE_PRECISION);
 
         // retreive managment fee and net payout from gross accrued yield
-        uint256 managmentFee = grossAccrued * PERCENTAGE_YIELD_FEE / C.MAX_PERCENTAGE;
+        uint256 managmentFee = grossAccrued * C.PERCENTAGE_YIELD_FEE / C.MAX_PERCENTAGE;
         uint256 netPayout = grossAccrued - managmentFee;
 
         // 5. Convert payout and fees from USD with 18 decimals to USDC with 6 decimals
@@ -431,6 +440,22 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         // emette l' evento di interesse maturato
     }
 
+    /**
+     * @notice Hook that is called before any transfer of value. This includes minting and burning.
+     * @dev Inherit from both ERC3643 and ERC3525, so we need to override and call both parent implementations. 
+     *      This function is used to implement the necessary checks and state updates before any value transfer occurs, including:
+     *      - Compliance checks from ERC3643 (e.g. KYC/AML checks on _to address)
+     *      - RiskManager checks (e.g. ensuring sufficient liquidity before allowing transfers that would reduce slot liquidity)
+     *      - Yield claiming before transfers (to ensure users receive accrued yield up to the transfer moment)
+     *      - PositionData initialization for new tokens in case of minting or partial transfers
+     *      After ERC3643 logic has been splitted into _beforeMint, _beforeBurn and _beforeTransfer.
+     * @param _from The address which previously owned the token (zero address if minting).
+     * @param _to The address which will receive the token (zero address if burning).
+     * @param _fromTokenId The token ID from which value is being transferred (zero if minting).
+     * @param _toTokenId The token ID to which value is being transferred (zero if burning).
+     * @param _slot The slot of the token being transferred.
+     * @param _value The amount of value being transferred.
+     */
     function _beforeValueTransfer(
         address _from,
         address _to,
@@ -452,6 +477,16 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         }
     }
 
+    /**
+     * @notice Hook that is called before minting new tokens.
+     * @dev This function is called when mint or transferFrom new tokens (partial transfer). 
+     * @dev Used on _beforeValueTransfer to implement the logic that needs to run before minting new tokens
+     * @param _to The address which will receive the newly minted tokens.
+     * @param _fromTokenId The token ID from which value is being transferred (zero if minting).
+     * @param _toTokenId The token ID to which value is being transferred (zero if burning).
+     * @param _slot The slot of the token being minted.
+     * @param _value The amount of value being minted.
+     */
     function _beforeMint(
         address _to,
         uint256 _fromTokenId,
@@ -468,13 +503,21 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         (uint256 currentYield, , ) = _getMarketDataForSlot(_slot);
         s_fromIdToPositionData[_toTokenId] = PositionData({
             entryYield: currentYield,
-            entryNAV: PAR,
+            entryNAV: C.PAR,
             mintTimestamp: block.timestamp,
             lastClaimTimestamp: block.timestamp
         });
 
     }
 
+    /**
+     * @notice Hook that is called before burning tokens.
+     * @dev This function is called on _beforeValueTransfer when burning tokens or partial burning.
+     * @param _from The address which previously owned the tokens.
+     * @param _fromTokenId The token ID from which value is being burned.
+     * @param _slot The slot of the token being burned.
+     * @param _value The amount of value being burned.
+     */
     function _beforeBurn(
         address _from,
         uint256 _fromTokenId,
@@ -491,6 +534,17 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         }
     }
 
+    /**
+     * @notice Hook that is called before transferring tokens.
+     * @dev This function is called on _beforeValueTransfer when transferring tokens or partial transfers.
+     * @dev Used to claiming yield for the source token before the transfer and to initialize PositionData for the destination token in case of partial transfer.
+     * @param _from The address which previously owned the tokens.
+     * @param _to The address which will receive the tokens.
+     * @param _fromTokenId The token ID from which value is being transferred.
+     * @param _toTokenId The token ID to which value is being transferred.
+     * @param _slot The slot of the token being transferred.
+     * @param _value The amount of value being transferred.
+     */
     function _beforeTransfer(
         address _from,
         address _to,
@@ -517,7 +571,6 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
                 lastClaimTimestamp:  block.timestamp
             });
         }
-        // se si vuole implementare la funzione di transfer forzato dal protocol owner, è necessario aggiornare l' accounting del tot value per slot anche durante i transfer
     }
 
 
@@ -550,7 +603,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
     function _calculateEntryFees(
         uint256 _amount
     ) internal pure returns (uint256 netAmount, uint256 feeCollected) {
-        feeCollected = (_amount * PERCENTAGE_ENTRY_FEE) / C.MAX_PERCENTAGE;
+        feeCollected = (_amount * C.PERCENTAGE_ENTRY_FEE) / C.MAX_PERCENTAGE;
         netAmount = _amount - feeCollected;
     }
 
@@ -578,18 +631,18 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         }
 
         uint256 remainingTime = penaltyPeriod - elapsedTime;
-        uint256 currentFeePercentage = (PERCENTAGE_EXIT_FEE_MAX * remainingTime) / penaltyPeriod;
+        uint256 currentFeePercentage = (C.PERCENTAGE_EXIT_FEE_MAX * remainingTime) / penaltyPeriod;
 
         feeAmount =(_usdValue * currentFeePercentage) / C.MAX_PERCENTAGE;
     }
 
     /**
-    * @notice Returns the penalty period associated with a slot
-    * @dev Each slot has a predefined penalty period constant. 
-    *      This function maps the slot ID to its corresponding penalty period.
-    * @param _slot The slot ID for which to get the penalty period
-    * @return The penalty period in seconds for the given slot
-    */
+     * @notice Returns the penalty period associated with a slot
+     * @dev Each slot has a predefined penalty period constant. 
+     *      This function maps the slot ID to its corresponding penalty period.
+     * @param _slot The slot ID for which to get the penalty period
+     * @return The penalty period in seconds for the given slot
+     */
     function _getPenaltyPeriod(uint256 _slot) internal pure returns (uint256) {
         if (_slot == C.SLOT_2Y) {
             return C.PENALTY_PERIOD_2Y;
@@ -754,7 +807,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
      * @dev Solidity requires that calls in try/catch blocks are external. We use `this.` to make an external call to the contract itself.
      * The function is marked `onlyRole` to prevent arbitrary calls from outside.
      */
-    function _executeRecoveryTransferExternal(address lostWallet, address newWallet) external override onlyRole(OWNER_ROLE) {
+    function _executeRecoveryTransferExternal(address lostWallet, address newWallet) external override onlyRole(RECOVERY_ROLE) {
         _executeRecoveryTransfer(lostWallet, newWallet);
     }
 
@@ -784,51 +837,51 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
 
     /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
     function recoveryAddress( address _lostWallet, address _newWallet, address _investorOnchainID) 
-    public override onlyRole(OWNER_ROLE) returns (bool) {
+    public override onlyRole(RECOVERY_ROLE) returns (bool) {
         return _recoveryAddress(_lostWallet, _newWallet, _investorOnchainID);
     }
 
     /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
-    function pause () public override onlyRole(OWNER_ROLE) {
+    function pause () public override onlyRole(PAUSER_ROLE) {
         _pause();
     }
 
     /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
-    function unpause () public override onlyRole(OWNER_ROLE) {
+    function unpause () public override onlyRole(PAUSER_ROLE) {
         _unpause();
     }
 
     /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
-    function setAddressFrozen(address _userAddress, bool _freeze) external override onlyRole(OWNER_ROLE) {
+    function setAddressFrozen(address _userAddress, bool _freeze) external override onlyRole(FREEZER_ROLE) {
         _setAddressFrozen(_userAddress, _freeze);
     }
 
     /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
-    function freezePartialTokens(uint256 _tokenId, uint256 _amount) external override onlyRole(OWNER_ROLE) {
+    function freezePartialTokens(uint256 _tokenId, uint256 _amount) external override onlyRole(FREEZER_ROLE) {
         _freezePartialToken(_tokenId, _amount);
     }
 
     /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
-    function unfreezePartialTokens(uint256 _tokenId, uint256 _amount) external override onlyRole(OWNER_ROLE) {
+    function unfreezePartialTokens(uint256 _tokenId, uint256 _amount) external override onlyRole(FREEZER_ROLE) {
         _unfreezePartialToken(_tokenId, _amount);
     }
 
     /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
-    function batchSetAddressFrozen(address[] calldata _userAddresses, bool[] calldata _freeze) external override onlyRole(OWNER_ROLE) {
+    function batchSetAddressFrozen(address[] calldata _userAddresses, bool[] calldata _freeze) external override onlyRole(FREEZER_ROLE) {
         for (uint256 i = 0; i < _userAddresses.length; i++) {
             _setAddressFrozen(_userAddresses[i], _freeze[i]);
         }
     }
 
     /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
-    function batchFreezePartialTokens(uint256[] calldata _tokenId, uint256[] calldata _amounts) external override onlyRole(OWNER_ROLE) {
+    function batchFreezePartialTokens(uint256[] calldata _tokenId, uint256[] calldata _amounts) external override onlyRole(FREEZER_ROLE) {
         for (uint256 i = 0; i < _tokenId.length; i++) {
             _freezePartialToken(_tokenId[i], _amounts[i]);
         }
     }
 
     /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
-    function batchUnfreezePartialTokens(uint256[] calldata _tokenId, uint256[] calldata _amounts) external override onlyRole(OWNER_ROLE) {
+    function batchUnfreezePartialTokens(uint256[] calldata _tokenId, uint256[] calldata _amounts) external override onlyRole(FREEZER_ROLE) {
         for (uint256 i = 0; i < _tokenId.length; i++) {
             _unfreezePartialToken(_tokenId[i], _amounts[i]);
         }

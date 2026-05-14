@@ -44,6 +44,14 @@ library TokenConstants {
     uint256 internal constant PERCENTAGE_PRECISION = 10000;
     uint256 internal constant MAX_PERCENTAGE = 100 * PERCENTAGE_PRECISION; // 100% in percentage precision
 
+    /// @dev constant unit value to calculate NAV.
+    uint256 internal constant PAR = 1e18; 
+
+    uint256 internal constant PERCENTAGE_YIELD_FEE = 20 * PERCENTAGE_PRECISION; // 20% fee on yield
+    uint256 internal constant PERCENTAGE_ENTRY_FEE = 2 * PERCENTAGE_PRECISION / 10; // 0,2% fee on entry
+    uint256 internal constant PERCENTAGE_EXIT_FEE_MAX = 5 * PERCENTAGE_PRECISION ; // 5% fee on exit
+
+
     /**
      * @dev The maximum delay for USDC price feed updates, in seconds.
      * @dev USDC pricefeed can be updated less frequently than the assets in the index, so we allow a longer delay for it.
