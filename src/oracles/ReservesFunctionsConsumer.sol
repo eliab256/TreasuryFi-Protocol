@@ -12,7 +12,7 @@ contract ReservesFunctionsConsumer is IReservesFunctionsConsumer, FunctionsClien
     
     using FunctionsRequest for FunctionsRequest.Request;
 
-    bytes32 public constant UPDATER_ROLE = keccak256("UPDATER_ROLE");
+    bytes32 public constant AUTOMATION_ROLE = keccak256("AUTOMATION_ROLE");
 
     uint32 internal immutable i_gasLimit;
     bytes32 internal immutable i_donID;
@@ -27,15 +27,16 @@ contract ReservesFunctionsConsumer is IReservesFunctionsConsumer, FunctionsClien
         address router,
         bytes32 donID,
         uint32 gasLimit,
-        address oracle
+        address oracle,
+        address automationContract
     ) FunctionsClient(router) {
-        if (oracle == address(0)) revert ReservesFunctionsConsumer__ZeroAddress();
+        if (oracle == address(0) || automationContract == address(0)) revert ReservesFunctionsConsumer__ZeroAddress();
         i_donID = donID;
         i_gasLimit = gasLimit;
         i_oracle = oracle;
 
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _grantRole(UPDATER_ROLE, msg.sender);
+        _grantRole(AUTOMATION_ROLE, automationContract);
     }
 
     // ----------------------------
@@ -71,7 +72,7 @@ contract ReservesFunctionsConsumer is IReservesFunctionsConsumer, FunctionsClien
     }
 
     /// @dev Inherited from IReservesFunctionsConsumer. See interface for details.
-    function sendRequest() external onlyRole(UPDATER_ROLE) returns (bytes32) {
+    function sendRequest() external onlyRole(AUTOMATION_ROLE) returns (bytes32) {
         FunctionsRequest.Request memory req;
         req.initializeRequestForInlineJavaScript(source);
 
@@ -90,6 +91,7 @@ contract ReservesFunctionsConsumer is IReservesFunctionsConsumer, FunctionsClien
         bytes memory response,
         bytes memory err
     ) internal override {
+        // 1. Validate the request ID, if doesn't match the last request ID, revert with an error
         if (requestId != s_lastRequestId) revert ReservesFunctionsConsumer__UnexpectedRequestID(requestId);
 
         s_lastResponse = response;
@@ -97,6 +99,7 @@ contract ReservesFunctionsConsumer is IReservesFunctionsConsumer, FunctionsClien
 
         uint256 timestamp;
 
+        // 2. If there is no error, decode the response and update the oracle with the new values
         if (err.length == 0) {
             (
                 uint256[4] memory bond,
@@ -105,10 +108,14 @@ contract ReservesFunctionsConsumer is IReservesFunctionsConsumer, FunctionsClien
                 bytes memory signature
             ) = abi.decode(response, (uint256[4], uint256[4], uint256, bytes));
 
+            // 3. Validate the response format, if the bond or cash arrays don't have exactly 4 elements, 
+            //    revert with an error
             if (bond.length != 4 || cash.length != 4) revert ReservesFunctionsConsumer__InvalidArrayLength();
 
             timestamp = ts;
 
+            // 4. Try to call the oracle's update function with the new values, 
+            //    if it reverts, catch the error and continue without reverting
             try IReservesOracle(i_oracle).updateUsdValues(
                 bond,
                 cash,
@@ -116,7 +123,9 @@ contract ReservesFunctionsConsumer is IReservesFunctionsConsumer, FunctionsClien
                 signature,
                 err
             ) {}
-            catch {}
+            catch (bytes memory oracleErr) {
+                emit OracleUpdateFailed(requestId, oracleErr);
+            }
         }
 
         emit Response(requestId, timestamp, response, err);

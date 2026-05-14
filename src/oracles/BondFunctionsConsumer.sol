@@ -16,7 +16,8 @@ contract BondFunctionsConsumer is
     error BondFunctionsConsumer__InvalidResponseLength();
     using FunctionsRequest for FunctionsRequest.Request;
 
-    bytes32 public constant UPDATER_ROLE = keccak256("UPDATER_ROLE");
+    /// @dev BondAutomation (chainlink automation + manual trigger from admin if grace pariod passed)
+    bytes32 public constant AUTOMATION_ROLE = keccak256("AUTOMATION_ROLE");
 
     uint32 internal immutable i_gasLimit;
     bytes32 internal immutable i_donID;
@@ -49,9 +50,10 @@ contract BondFunctionsConsumer is
         address _router,
         bytes32 _donID,
         uint32 _gasLimit,
-        address _bondOracle
+        address _bondOracle,
+        address _automationContract
     ) FunctionsClient(_router) {
-        if(_router == address(0) || _bondOracle == address(0)) {
+        if(_router == address(0) || _bondOracle == address(0) || _automationContract == address(0)) {
             revert BondFunctionsConsumer__InvalidAddress();
         }
         i_donID = _donID;
@@ -59,7 +61,7 @@ contract BondFunctionsConsumer is
         i_bondOracle = _bondOracle;
 
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _grantRole(UPDATER_ROLE, msg.sender);
+        _grantRole(AUTOMATION_ROLE, _automationContract);
     }
 
     /// @dev Inherited from IBondFunctionsConsumer. See interface for details.
@@ -71,7 +73,7 @@ contract BondFunctionsConsumer is
     }
 
     /// @dev Inherited from IBondFunctionsConsumer. See interface for details.
-    function sendRequest() external onlyRole(UPDATER_ROLE) returns (bytes32) {
+    function sendRequest() external onlyRole(AUTOMATION_ROLE) returns (bytes32) {
         FunctionsRequest.Request memory req;
         req.initializeRequestForInlineJavaScript(source);
 
@@ -113,7 +115,9 @@ contract BondFunctionsConsumer is
             timestamp = ts;
 
             try IBondOracle(i_bondOracle).updateYields(values, ts, err) {}
-            catch {}
+            catch (bytes memory oracleErr) {
+                emit OracleUpdateFailed(requestId, oracleErr);
+            }
         }
 
         emit Response(requestId, timestamp, response, err);

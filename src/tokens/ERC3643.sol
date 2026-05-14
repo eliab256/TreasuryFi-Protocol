@@ -17,6 +17,12 @@ import {IERC3643} from "../interfaces/IERC3643.sol";
  */
 abstract contract ERC3643 is AccessControl, IERC3643 {
 
+    // @audit-issue spsostare access control in TreasuryBondToken? 
+     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
+     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
+     bytes32 public constant FREEZER_ROLE = keccak256("FREEZER_ROLE");
+     bytes32 public constant RECOVERY_ROLE = keccak256("RECOVERY_ROLE");
+     bytes32 public constant COMPLIANCE_MANAGER_ROLE = keccak256("COMPLIANCE_MANAGER_ROLE");
     // Eventi
     event IdentityRegistryAdded(address indexed identityRegistry);
     event AddressFrozen(address indexed wallet, bool indexed frozen, address indexed owner);

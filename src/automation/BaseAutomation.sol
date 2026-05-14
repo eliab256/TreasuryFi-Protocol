@@ -10,8 +10,8 @@ import {IBaseAutomation} from "../interfaces/IBaseAutomation.sol";
  * Implements the common upkeep check and perform logic for all automation contracts.
  */
 abstract contract BaseAutomation is IBaseAutomation, AccessControl {
-    bytes32 public constant AUTOMATION_ADMIN_ROLE =
-        keccak256("AUTOMATION_ADMIN_ROLE");
+    bytes32 public constant AUTOMATION_ROLE =
+        keccak256("AUTOMATION_ROLE");
 
     uint256 internal constant GRACE_PERIOD = 6 hours;
 
@@ -23,13 +23,13 @@ abstract contract BaseAutomation is IBaseAutomation, AccessControl {
     constructor(address initialAdmin, uint256 _interval) {
         i_interval = _interval;
         _grantRole(DEFAULT_ADMIN_ROLE, initialAdmin);
-        _grantRole(AUTOMATION_ADMIN_ROLE, initialAdmin);
+        _grantRole(AUTOMATION_ROLE, initialAdmin);
     }
 
     /// @dev Inherited from IBaseAutomation. See interface for details.
     function setChainlinkForwarder(
         address _chainlinkForwarder
-    ) external onlyRole(AUTOMATION_ADMIN_ROLE) {
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (_chainlinkForwarder == address(0)) revert BaseAutomation__InvalidForwarderAddress();
 
         if (s_chainlinkForwarder != address(0)) {
@@ -41,7 +41,7 @@ abstract contract BaseAutomation is IBaseAutomation, AccessControl {
     /// @dev Inherited from IBaseAutomation. See interface for details.
     function setUpkeepId(
         uint256 _upkeepId
-    ) external onlyRole(AUTOMATION_ADMIN_ROLE) {
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (_upkeepId == 0) revert BaseAutomation__InvalidUpkeepId();
 
         if (s_upkeepId != 0) {
@@ -67,7 +67,7 @@ abstract contract BaseAutomation is IBaseAutomation, AccessControl {
      * - During grace period: only Chainlink Automation can call
      * - After grace period: owner or Chainlink Automation can call
      */
-    function performUpkeep(bytes calldata performData) external override {
+    function performUpkeep(bytes calldata performData) external override onlyRole(AUTOMATION_ROLE) {
         (bool upkeepNeeded, ) = checkUpkeep(performData);
         if (!upkeepNeeded) {
             revert BaseAutomation__UpkeepNotNeeded();
@@ -82,13 +82,7 @@ abstract contract BaseAutomation is IBaseAutomation, AccessControl {
                 revert BaseAutomation__OnlyChainlinkAutomation();
             }
         } else {
-            if (
-                msg.sender != address(s_chainlinkForwarder) &&
-                !hasRole(AUTOMATION_ADMIN_ROLE, msg.sender)
-            ) {
-                revert BaseAutomation__OnlyChainlinkAutomationOrOwner();
-            }
-
+            // After grace period: owner or Chainlink Automation can call
             if (msg.sender != address(s_chainlinkForwarder)) {
                 emit ManualUpkeepExecuted(msg.sender, block.timestamp);
             }

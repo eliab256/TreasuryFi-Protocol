@@ -7,16 +7,12 @@ import {IReservesOracle} from "../interfaces/IReservesOracle.sol";
 import {IUpdateRiskManagerAutomation} from "../interfaces/IUpdateRiskManagerAutomation.sol";
 import {ITreasuryBondToken} from "../interfaces/ITreasuryBondToken.sol";
 
-// @audit-issue sistmare interface ITreasuryBondToken per chimaare update e sistemare nomi funcs
 /**
- * @title BaseAutomation
- * @notice Abstract base contract for Chainlink Automation with grace period logic.
- * Implements the common upkeep check and perform logic for all automation contracts.
+ * @title UpdateRiskManager
  */
- contract UpdateRiskMNanager is IUpdateRiskManagerAutomation, AccessControl{
+ contract UpdateRiskManager is IUpdateRiskManagerAutomation, AccessControl{
 
-    bytes32 public constant AUTOMATION_ADMIN_ROLE = keccak256("AUTOMATION_ADMIN_ROLE");
-    bytes32 public constant PERFORMER_ROLE = keccak256("PERFORMER_ROLE");
+    bytes32 public constant AUTOMATION_ROLE = keccak256("AUTOMATION_ROLE");
 
     address private s_chainlinkForwarder;
     uint256 private s_upkeepId;
@@ -28,14 +24,17 @@ import {ITreasuryBondToken} from "../interfaces/ITreasuryBondToken.sol";
     address private immutable i_bondYieldsOracle;
     address private immutable i_tokenContract;
 
-    constructor(address initialAdmin, address _tokenContract, address _reservesOracle, address _bondYieldsOracle) {
+    constructor(
+        address _tokenContract, 
+        address _reservesOracle, 
+        address _bondYieldsOracle) {
         if(_tokenContract == address(0) || _reservesOracle == address(0) || _bondYieldsOracle == address(0))
             revert UpdateRiskManager__ZeroAddress();
         i_reservesOracle = _reservesOracle;
         i_bondYieldsOracle = _bondYieldsOracle;
         i_tokenContract = _tokenContract;
-        _grantRole(DEFAULT_ADMIN_ROLE, initialAdmin);
-        _grantRole(AUTOMATION_ADMIN_ROLE, initialAdmin);
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(AUTOMATION_ROLE, _tokenContract);
     }
 
     /**
@@ -51,7 +50,7 @@ import {ITreasuryBondToken} from "../interfaces/ITreasuryBondToken.sol";
             revert UpdateRiskManager__ChainlinkForwarderAddressAlreadySet();
         }
         s_chainlinkForwarder = _chainlinkForwarder;
-        _grantRole(AUTOMATION_ADMIN_ROLE, _chainlinkForwarder);
+        _grantRole(AUTOMATION_ROLE, _chainlinkForwarder);
     }
 
     /**
@@ -85,10 +84,10 @@ import {ITreasuryBondToken} from "../interfaces/ITreasuryBondToken.sol";
 
     /**
      * @notice Performs the upkeep, callable by Chainlink Automation forwarder or RiskManager.
-     * @dev Access is restricted via AUTOMATION_ADMIN_ROLE, granted to both s_chainlinkForwarder and i_tokenContract.
+     * @dev Access is restricted via AUTOMATION_ROLE, granted to both s_chainlinkForwarder and i_tokenContract.
      * @param performData ABI-encoded (bool yieldsUpdateNeeded, bool reservesUpdateNeeded)
      */
-    function performUpkeep(bytes calldata performData) external onlyRole(AUTOMATION_ADMIN_ROLE) {
+    function performUpkeep(bytes calldata performData) external onlyRole(AUTOMATION_ROLE) {
         (bool yieldsUpdateNeeded, bool reservesUpdateNeeded) = abi.decode(performData, (bool, bool));
 
          uint256 yieldsTimestamp = IBondOracle(i_bondYieldsOracle).getLastUpdatedTimestamp();
@@ -102,11 +101,11 @@ import {ITreasuryBondToken} from "../interfaces/ITreasuryBondToken.sol";
         }
 
         if (yieldsUpdateNeeded) {
-            IRiskManager(i_tokenContract).updateYieldsValues();
+            ITreasuryBondToken(i_tokenContract).updateYieldsValues();
             s_lastYieldsUpdate = yieldsTimestamp;
         }
         if (reservesUpdateNeeded) {
-            IRiskManager(i_tokenContract).updateReserveValues();
+            ITreasuryBondToken(i_tokenContract).updateReserveValues();
             s_lastReserveUpdate = reservesTimestamp;
         }
 

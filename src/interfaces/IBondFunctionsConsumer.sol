@@ -17,6 +17,7 @@ interface IBondFunctionsConsumer {
         bytes response,
         bytes err
     );
+    event OracleUpdateFailed(bytes32 indexed requestId, bytes oracleError);
 
     // Setters
 
