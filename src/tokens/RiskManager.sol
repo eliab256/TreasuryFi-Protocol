@@ -76,10 +76,10 @@ abstract contract RiskManager {
     }
     /// @dev slot => last valid market data for the slot, used to detect shocks and freeze slots if needed
     /// @dev used to use only 1SLOAD to get all the data for a slot
-    mapping(uint256 => SlotMarketData) internal s_lastValidSlotMarketData; 
+    mapping(uint256 => SlotMarketData) private s_lastValidSlotMarketData; 
     
     /// @dev Mapping to track risk parameters for each slot
-    mapping(uint256 => SlotRiskParams) internal s_slotRiskParams;
+    mapping(uint256 => SlotRiskParams) private s_slotRiskParams;
 
     /// @dev Per-slot freeze state packed into one storage slot 
     ///      (frozenByYields + frozenByReserves + frozen = 3 bools → 1 SLOAD)
@@ -88,19 +88,18 @@ abstract contract RiskManager {
         bool frozenByReserves;
         bool frozen;
     }
-    mapping(uint256 => SlotFreezeState) internal s_slotFrozenState;
+    mapping(uint256 => SlotFreezeState) private s_slotFrozenState;
 
     /// @dev liabilities for each slot, updated on mint, burn and yield claim
     mapping(uint256 => uint256) private s_totalLiabilitiesPerSlot;
 
-    /// @dev daily redeem volume per slot — reset every 24h, used by _validateRedeemRateLimit
-    mapping(uint256 => uint256) internal s_dailyRedeemVolume;
+    /// @dev daily redeem volume per slot, reset every 24h, used by _validateRedeemRateLimit
+    mapping(uint256 => uint256) private s_dailyRedeemVolume;
     /// @dev timestamp of the start of the current 24h redeem window per slot
-    mapping(uint256 => uint256) internal s_dailyRedeemWindowStart;
+    mapping(uint256 => uint256) private s_dailyRedeemWindowStart;
 
-    // @audit-issue forse queste struct si possono eliminar e passare ad avere i mapping
-    BondYieldsResponse internal s_lastValidYields;
-    ReservesResponse internal s_lastValidReserves;
+    BondYieldsResponse private s_lastValidYields;
+    ReservesResponse private s_lastValidReserves;
 
     /**
      * @notice Constructor to initialize the RiskManager with references to automation and oracle contracts.
@@ -439,6 +438,11 @@ abstract contract RiskManager {
         return s_totalLiabilitiesPerSlot[_slot];
     }
 
+    function _getMarketDataForSlot(uint256 _slot) internal view returns (uint256 yield, uint256 reserve, uint256 cashBuffer) {
+        SlotMarketData memory data = s_lastValidSlotMarketData[_slot];
+        return (data.yield, data.reserve, data.cashBuffer);
+    }
+
 /////////////////////////////////////////////////////////////////////
 ///////////////////////// Yields validation /////////////////////////
 /////////////////////////////////////////////////////////////////////
@@ -466,7 +470,7 @@ abstract contract RiskManager {
 ////////////////////////////////////////////////////////////////////
 ////////////////////// Liquidity validation //////////////////////// 
 ////////////////////////////////////////////////////////////////////  
-    function _validateInstantLiquidity(uint256 _slot, uint256 _requiredLiquidity) internal view {
+    function _validateInstantLiquidity(uint256 _slot, uint256 _requiredLiquidity) private view {
         uint256 availableLiquidity = i_treasury.getTotalUsdcLiquidityPerSlot(_slot);
         if (availableLiquidity < _requiredLiquidity) {
             revert RiskManager__InsufficientLiquidity(_slot, availableLiquidity, _requiredLiquidity);
@@ -510,8 +514,7 @@ abstract contract RiskManager {
         }
     }
 
-    // @audit-issue sto facendo check su value ma dovrei farlo su usdc?
-    function _validateRedeemRateLimit(uint256 _slot, uint256 _redeemAmount, SlotRiskParams memory _riskParams) internal {
+    function _validateRedeemRateLimit(uint256 _slot, uint256 _redeemAmount, SlotRiskParams memory _riskParams) private {
         if (_riskParams.maxDailyRedeem == 0) return; // rate limit disabled
 
         // Reset the 24h window if it has elapsed
@@ -572,11 +575,10 @@ abstract contract RiskManager {
         s_totalLiabilitiesPerSlot[_slot] -= _value;
     }
 
-    function _riskManagerBeforeClaimingYield(uint256 _slot, uint256 _value) internal {
-        // 1. Check staleness and freeze — no struct loaded in memory
-        _checkSlotSafe(_slot);
 
-        s_totalLiabilitiesPerSlot[_slot] -= _value;
+    function _riskManagerBeforeTransferLiquidity(uint256 _slot, uint256 _requiredLiquidity) internal {
+        _validateInstantLiquidity(_slot, _requiredLiquidity);
+        _validateRedeemRateLimit(_slot, _requiredLiquidity, s_slotRiskParams[_slot]);
     }
 
     function _isSolvent() internal view returns(bool) {

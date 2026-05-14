@@ -192,7 +192,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         uint256 tokenBalance = balanceOf(_tokenId);
         (uint256 usdcPayout, uint256 netYieldToClaimInUsdc, uint256 managmentFeeInUsdc , uint256 earlyRedeemFeeUsdc, uint256 currentNAV) = _closePositionValue(_tokenId, slot, tokenBalance);
         uint256 totalUsdcOutFromSlotLiquidity = usdcPayout + netYieldToClaimInUsdc + earlyRedeemFeeUsdc + managmentFeeInUsdc;
-        _validateInstantLiquidity(slot, totalUsdcOutFromSlotLiquidity);
+        _riskManagerBeforeTransferLiquidity(slot, totalUsdcOutFromSlotLiquidity);
         _burn(_tokenId);
         i_treasury.withdrawUsdcFromClosePosition(usdcPayout, owner, slot, netYieldToClaimInUsdc, earlyRedeemFeeUsdc, managmentFeeInUsdc);
         // emit event position closed
@@ -208,7 +208,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         uint256 slot = slotOf(_tokenId);
         (uint256 usdcPayout, uint256 netYieldToClaimInUsdc, uint256 managmentFeeInUsdc , uint256 earlyRedeemFeeUsdc, uint256 currentNAV) = _closePositionValue(_tokenId, slot, _valueToBurn);
         uint256 totalUsdcOutFromSlotLiquidity = usdcPayout + netYieldToClaimInUsdc + earlyRedeemFeeUsdc + managmentFeeInUsdc;
-        _validateInstantLiquidity(slot, totalUsdcOutFromSlotLiquidity);
+        _riskManagerBeforeTransferLiquidity(slot, totalUsdcOutFromSlotLiquidity);
         _burnValue(_tokenId, _valueToBurn);
         i_treasury.withdrawUsdcFromClosePosition(usdcPayout, owner, slot, netYieldToClaimInUsdc, earlyRedeemFeeUsdc, managmentFeeInUsdc);
 
@@ -232,7 +232,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         //    This mirrors the behaviour of _beforeTransfer for regular transfers.
         (uint256 netPayout, uint256 managementFee) = _claimYield(_tokenId, s_fromIdToPositionData[_tokenId]);
         if (netPayout + managementFee > 0) {
-            _validateInstantLiquidity(slot, netPayout + managementFee);
+            _riskManagerBeforeTransferLiquidity(slot, netPayout + managementFee);
             i_treasury.transferUsdcFromYieldClaim(netPayout, _from, slot, managementFee);
         }
 
@@ -277,7 +277,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         uint256 _valueToBurn
     ) internal returns (uint256 usdcPayout, uint256 netYieldToClaimInUsdc, uint256 managmentFeeInUsdc, uint256 earlyRedeemFeeUsdc, uint256 currentNAV){
         // 1. Get the current yield for the slot 
-        uint256 currentYield = s_lastValidSlotMarketData[_slot].yield;
+        (uint256 currentYield, , ) = _getMarketDataForSlot(_slot);
 
         // 2. get position data
         PositionData memory posData = s_fromIdToPositionData[_tokenId];
@@ -377,7 +377,10 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         // 4. get total yield to claim in usd with 18 decimals, this function also updates the lastClaimTimestamp to now
         (uint256 netPayout, uint256 managmentFee) = _claimYield(_tokenId, posData);
 
-        // 5. call treasury to transfer USDC to the user, this call will also update the treasury 
+        // 5. ensure treasury has enough liquidity to pay yield
+        _riskManagerBeforeTransferLiquidity(slot, netPayout + managmentFee);
+
+        // 6. call treasury to transfer USDC to the user, this call will also update the treasury 
         //    accounting and emit the event usdcWithdrawnFromClaimYield 
         i_treasury.transferUsdcFromYieldClaim(netPayout , msg.sender, slot, managmentFee);
     }
@@ -458,8 +461,9 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         // 2. Initialize PositionData for the new token with current slot yield and PAR NAV.
         //    For partial transfers, PositionData will be overwritten in _beforeTransfer with
         //    the inherited values from the source token (entryYield, entryNAV, mintTimestamp).
+        (uint256 currentYield, , ) = _getMarketDataForSlot(_slot);
         s_fromIdToPositionData[_toTokenId] = PositionData({
-            entryYield: s_lastValidSlotMarketData[_slot].yield,
+            entryYield: currentYield,
             entryNAV: PAR,
             mintTimestamp: block.timestamp,
             lastClaimTimestamp: block.timestamp
@@ -493,7 +497,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
     ) internal {
         // Claim yield accrued on the source token before the transfer
         (uint256 netPayout, uint256 managementFee) = _claimYield(_fromTokenId, s_fromIdToPositionData[_fromTokenId]);
-        _validateInstantLiquidity(_slot, netPayout + managementFee);
+        _riskManagerBeforeTransferLiquidity(_slot, netPayout + managementFee);
         i_treasury.transferUsdcFromYieldClaim(netPayout, _from, _slot, managementFee);
 
         // Partial transfer (value-split): _beforeMint already wrote a default PositionData on _toTokenId.
