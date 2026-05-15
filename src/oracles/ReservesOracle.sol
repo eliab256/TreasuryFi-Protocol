@@ -17,13 +17,23 @@ contract ReservesOracle is IReservesOracle, ERC165, AccessControl {
 
     ReservesResponse internal s_state;
     address internal s_signer;
+    address internal s_functionsConsumer;
+    bool private s_consumerSet;
 
-    constructor(address consumer, address signer) {
-        if (consumer == address(0) || signer == address(0))
+    constructor(address signer) {
+        if (signer == address(0))
             revert ReservesOracle__ZeroAddress();
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _grantRole(UPDATER_ROLE, consumer);
         s_signer = signer;
+    }
+
+    function setFunctionsConsumer(address _consumer) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (s_consumerSet) revert ReservesOracle__ConsumerAlreadySet();
+        if (_consumer == address(0)) revert ReservesOracle__ZeroAddress();
+        _grantRole(UPDATER_ROLE, _consumer);
+        s_functionsConsumer = _consumer;
+        s_consumerSet = true;
+        emit ConsumerSet(_consumer);
     }
 
     /// @dev Inherited from IReservesOracle. See interface for details.
@@ -115,6 +125,11 @@ contract ReservesOracle is IReservesOracle, ERC165, AccessControl {
     /// @dev Inherited from IReservesOracle. See interface for details.
     function getSigner() external view returns (address) {
         return s_signer;
+    }
+
+    /// @dev Inherited from IReservesOracle. See interface for details.
+    function getFunctionsConsumer() external view returns (address) {
+        return s_functionsConsumer;
     }
 
     function supportsInterface(

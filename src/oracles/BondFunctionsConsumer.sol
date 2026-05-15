@@ -50,10 +50,9 @@ contract BondFunctionsConsumer is
         address _router,
         bytes32 _donID,
         uint32 _gasLimit,
-        address _bondOracle,
-        address _automationContract
+        address _bondOracle
     ) FunctionsClient(_router) {
-        if(_router == address(0) || _bondOracle == address(0) || _automationContract == address(0)) {
+        if(_router == address(0) || _bondOracle == address(0)) {
             revert BondFunctionsConsumer__InvalidAddress();
         }
         i_donID = _donID;
@@ -61,7 +60,13 @@ contract BondFunctionsConsumer is
         i_bondOracle = _bondOracle;
 
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _grantRole(AUTOMATION_ROLE, _automationContract);
+    }
+
+    function setAutomationContract(address _automationContract) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if(_automationContract == address(0)) {
+            revert BondFunctionsConsumer__InvalidAddress();
+        }
+        grantRole(AUTOMATION_ROLE, _automationContract);
     }
 
     /// @dev Inherited from IBondFunctionsConsumer. See interface for details.

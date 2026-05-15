@@ -7,6 +7,7 @@ import {TreasuryBondTokenConstructorParams} from "../src/types.sol";
 import {MockV3Aggregator} from "../test/mocks/MockV3Aggregator.sol";
 import {MockERC20} from "../test/mocks/MockERC20.sol";
 import {MockFunctionsRouter} from "../test/mocks/MockFunctionsRouter.sol";
+import {IKeeperRegistryMaster} from "@chainlink/contracts/src/v0.8/interfaces/KeeperRegistryInterface.sol";
 
 /**
  * @title HelperConfig
@@ -17,9 +18,11 @@ contract HelperConfig is CodeConstants, Script {
     error HelperConfig__InvalidChainId();
 
     struct NetworkConfig{
+        address deployer;
         string name;
         string symbol;
         uint8 decimals;
+        uint256 apiUpdateInterval;
         address usdcAddress;
         address usdcPriceFeedAddress;
         //address identityRegistry;
@@ -32,7 +35,8 @@ contract HelperConfig is CodeConstants, Script {
         address feesCollector;
         address automationRegistry;
         address automationRegistrar;
-        address linkToken;   
+        address linkToken; 
+        address fundingAmountForEachUpkeep;
         address functionsRouter;
         uint256 donId;
         uint32 gasLimit;
@@ -88,15 +92,18 @@ contract HelperConfig is CodeConstants, Script {
 
     function getEthSepoliaConfig() internal pure returns (NetworkConfig memory) {
         return NetworkConfig({
+            deployer: ETH_SEPOLIA_DEPLOYER_ADDRESS,
             name: BASE_TOKEN_NAME,
             symbol: BASE_TOKEN_SYMBOL,
             decimals: BASE_TOKEN_DECIMALS,
+            apiUpdateInterval: API_UPDATE_INTERVAL,
             usdcAddress: ETH_SEPOLIA_USDC_CONTRACT,
             usdcPriceFeedAddress: ETH_SEPOLIA_USDC_PRICEFEED,
             feesCollector: ETH_SEPOLIA_FEES_COLLECTOR,
             automationRegistry: ETH_SEPOLIA_KEEPERS_REGISTRY,
             automationRegistrar: ETH_SEPOLIA_KEEPERS_REGISTRAR,
             linkToken: ETH_SEPOLIA_LINK_TOKEN,
+            fundingAmountForEachUpkeep: LINK_FUNDING_AMOUNT_FOR_EACH_UPKEEP,
             functionsRouter: ETH_SEPOLIA_FUNCIONS_ROUTER,
             donId: ETH_SEPOLIA_DON_ID,
             gasLimit: ETH_SEPOLIA_GAS_LIMIT,
@@ -110,12 +117,14 @@ contract HelperConfig is CodeConstants, Script {
             name: BASE_TOKEN_NAME,
             symbol: BASE_TOKEN_SYMBOL,
             decimals: BASE_TOKEN_DECIMALS,
+            apiUpdateInterval: API_UPDATE_INTERVAL,
             usdcAddress: POLYGON_AMOY_USDC_CONTRACT,
             usdcPriceFeedAddress: POLYGON_AMOY_USDC_PRICEFEED,
             feesCollector: POLYGON_AMOY_FEES_COLLECTOR,
             automationRegistry: POLYGON_AMOY_KEEPERS_REGISTRY,
             automationRegistrar: POLYGON_AMOY_KEEPERS_REGISTRAR,
             linkToken: POLYGON_AMOY_LINK_TOKEN,
+            fundingAmountForEachUpkeep: LINK_FUNDING_AMOUNT_FOR_EACH_UPKEEP,
             functionsRouter: POLYGON_AMOY_FUNCIONS_ROUTER,
             donId: POLYGON_AMOY_DON_ID,
             gasLimit: POLYGON_AMOY_GAS_LIMIT,
@@ -150,12 +159,14 @@ contract HelperConfig is CodeConstants, Script {
             name: BASE_TOKEN_NAME,
             symbol: BASE_TOKEN_SYMBOL,
             decimals: BASE_TOKEN_DECIMALS,
+            apiUpdateInterval: API_UPDATE_INTERVAL,
             usdcAddress: address(mockUsdc),
             usdcPriceFeedAddress: address(mockUsdcPriceFeed),
             feesCollector: anvilFeeCollector,
             automationRegistry: anvilRegistryMock,
             automationRegistrar: anvilRegistrarMock,
             linkToken: address(mockLinkToken),
+            fundingAmountForEachUpkeep: LINK_FUNDING_AMOUNT_FOR_EACH_UPKEEP,
             functionsRouter: address(mockFunctionsRouter),
             donId: 0, // @audit-issue verificare mock gestisce don id
             gasLimit: ANVIL_GAS_LIMIT,
@@ -167,14 +178,14 @@ contract HelperConfig is CodeConstants, Script {
         return (mockUsdc, mockUsdcPriceFeed, mockFunctionsRouter);
     }
 
-    // function getForwarderFromUpkeepId(uint256 _upkeepId) public view returns (address) {
-    //     if (block.chainid != ANVIL_CHAIN_ID) {
-    //         IKeeperRegistryMaster registry = IKeeperRegistryMaster(activeNetworkConfig.automationRegistry);
-    //         return registry.getForwarder(_upkeepId);
-    //     } else {
-    //         return address(mockFunctionsRouter);
-    //     }
-    // }
+    function getForwarderFromUpkeepId(uint256 _upkeepId) public view returns (address) {
+        if (block.chainid != ANVIL_CHAIN_ID) {
+            IKeeperRegistryMaster registry = IKeeperRegistryMaster(activeNetworkConfig.automationRegistry);
+            return registry.getForwarder(_upkeepId);
+        } else {
+            return address(mockFunctionsRouter);
+        }
+    }
 
     /**
      * @notice Returns the Chainlink Automation Registrar address for current chain

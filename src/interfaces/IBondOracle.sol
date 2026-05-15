@@ -8,6 +8,7 @@ interface IBondOracle {
     error BondOracle__InvalidSlot();
     error BondOracle__ZeroAddress();
     error BondOracle__IncompleteResponse(uint256 length);
+    error BondOracle__ConsumerAlreadySet();
 
     event YieldUpdated(
         uint256 twoYearYield,
@@ -17,6 +18,7 @@ interface IBondOracle {
         uint256 timestamp
     );
     event YieldUpdateFailed(bytes err);
+    event ConsumerSet(address indexed consumer);
 
     /**
      * @notice Returns the yield for a given slot (1=2Y, 2=5Y, 3=10Y, 4=30Y)
@@ -60,5 +62,12 @@ interface IBondOracle {
      * @return The address of the FunctionsConsumer contract
      */ 
     function getFunctionsConsumer() external view returns (address);
+
+    /**
+     * @notice Sets the FunctionsConsumer contract address (one-shot, post-deploy).
+     * @dev Can only be called once by DEFAULT_ADMIN_ROLE.
+     * @param _consumer The address of the BondFunctionsConsumer contract.
+     */
+    function setFunctionsConsumer(address _consumer) external;
 
 }

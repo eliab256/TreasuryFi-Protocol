@@ -27,16 +27,20 @@ contract ReservesFunctionsConsumer is IReservesFunctionsConsumer, FunctionsClien
         address router,
         bytes32 donID,
         uint32 gasLimit,
-        address oracle,
-        address automationContract
+        address oracle
     ) FunctionsClient(router) {
-        if (oracle == address(0) || automationContract == address(0)) revert ReservesFunctionsConsumer__ZeroAddress();
+        if (oracle == address(0)) revert ReservesFunctionsConsumer__ZeroAddress();
         i_donID = donID;
         i_gasLimit = gasLimit;
         i_oracle = oracle;
 
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _grantRole(AUTOMATION_ROLE, automationContract);
+    }
+
+    /// @dev Inherited from IReservesFunctionsConsumer. See interface for details.
+    function setAutomationContract(address _automationContract) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (_automationContract == address(0)) revert ReservesFunctionsConsumer__ZeroAddress();
+        grantRole(AUTOMATION_ROLE, _automationContract);
     }
 
     // ----------------------------

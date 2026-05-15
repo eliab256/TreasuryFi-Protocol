@@ -28,6 +28,12 @@ interface IReservesFunctionsConsumer {
      */
     function setSubscriptionId(uint64 subscriptionId) external;
 
+    /**
+     * @notice Grants AUTOMATION_ROLE to the given automation contract.
+     * @param _automationContract The address of the ReservesAutomation contract.
+     */
+    function setAutomationContract(address _automationContract) external;
+
     // Actions
 
     /**

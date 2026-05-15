@@ -7,6 +7,7 @@ interface IReservesOracle {
     error ReservesOracle__ZeroAddress();
     error ReservesOracle__DataIsStale();
     error ReservesOracle__InvalidSignature(address recovered);
+    error ReservesOracle__ConsumerAlreadySet();
 
     // Events
     event UsdValueUpdated(
@@ -18,6 +19,7 @@ interface IReservesOracle {
         uint256 timestamp
     );
     event UsdValueUpdateFailed(bytes err);
+    event ConsumerSet(address indexed consumer);
 
     // Actions 
 
@@ -62,4 +64,17 @@ interface IReservesOracle {
      * @return The timestamp of the last update.
      */
     function getLastUpdatedTimestamp() external view returns (uint256);
+
+    /**
+     * @notice Sets the FunctionsConsumer contract address (one-shot, post-deploy).
+     * @dev Can only be called once by DEFAULT_ADMIN_ROLE.
+     * @param _consumer The address of the ReservesFunctionsConsumer contract.
+     */
+    function setFunctionsConsumer(address _consumer) external;
+
+    /**
+     * @notice Returns the address of the FunctionsConsumer contract authorized to update reserves.
+     * @return The address of the FunctionsConsumer contract.
+     */
+    function getFunctionsConsumer() external view returns (address);
 }

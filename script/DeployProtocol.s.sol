@@ -2,19 +2,33 @@
 pragma solidity ^0.8.0;
 
 import {Script} from "forge-std/Script.sol";
-import {ITreasuryBondToken} from "../interfaces/ITreasuryBondToken.sol";
-import {ITreasury} from "../interfaces/ITreasury.sol";
-import {IBondOracle} from "../interfaces/IBondOracle.sol";
-import {IReservesOracle} from "../interfaces/IReservesOracle.sol";
-import {IBondAutomation} from "../interfaces/IBondAutomation.sol";
-import {IReservesAutomation} from "../interfaces/IReservesAutomation.sol";
-import {IBondFunctionsConsumer} from "../interfaces/IBondFunctionsConsumer.sol";
-import {IReservesFunctionsConsumer} from "../interfaces/IReservesFunctionsConsumer.sol";
-import {IUpdateRiskManagerAutomation} from "../interfaces/IUpdateRiskManagerAutomation.sol";
-import {TokenConstants as C} from "../tokens/TokenConstants.sol";
+import {HelperConfig} from "./HelperConfig.sol";
+import {TreasuryBondToken} from "../src/tokens/TreasuryBondToken.sol";
+import {Treasury} from "../src/tokens/Treasury.sol";
+import {BondOracle} from "../src/oracles/BondOracle.sol";
+import {ReservesOracle} from "../src/oracles/ReservesOracle.sol";
+import {BondAutomation} from "../src/automation/BondAutomation.sol";
+import {ReservesAutomation} from "../src/automation/ReservesAutomation.sol";
+import {BondFunctionsConsumer} from "../src/oracles/BondFunctionsConsumer.sol";
+import {ReservesFunctionsConsumer} from "../src/oracles/ReservesFunctionsConsumer.sol";
+import {UpdateRiskManagerAutomation} from "../src/automation/UpdateRiskManagerAutomation.sol";
+import {TokenConstants as C} from "../src/tokens/TokenConstants.sol";
+import { AutomationRegistration } from './AutomationRegistration.sol';
+import {LinkTokenInterface} from "@chainlink/contracts/src/v0.8/shared/interfaces/LinkTokenInterface.sol";
 
 contract DeployProtocol is Script {
-    function run() external {
-        vm.startBroadcast();
+    function run() external returns(TreasuryBondToken, Treasury, BondOracle, 
+        ReservesOracle, BondAutomation, ReservesAutomation, BondFunctionsConsumer, 
+        ReservesFunctionsConsumer, UpdateRiskManagerAutomation, HelperConfig, 
+        address deployer, uint256 upkeepId, address forwarder) { 
+
+        HelperConfig helperConfig = new HelperConfig();
+        HelperConfig.NetworkConfig memory config = helperConfig.activeNetworkConfig();
+
+        deployer = config.deployer;
+
+        vm.startBroadcast(deployer);
+
+        console.log('======================= Contracts Deployment =================');
     }
 }

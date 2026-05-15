@@ -56,6 +56,8 @@ abstract contract CodeConstants {
     string internal constant BASE_TOKEN_SYMBOL = "TBT";
     uint8 internal constant BASE_TOKEN_DECIMALS = 18;
     uint8 public constant PRICE_FEED_DECIMALS = 8;
+    uint256 public constant API_UPDATE_INTERVAL = 24 hours;
+    uint256 public constant LINK_FUNDING_AMOUNT_FOR_EACH_UPKEEP = 5 * 10 ** 18; // 5 LINK
 
     // FeesCollector address
     address public constant ETH_SEPOLIA_FEES_COLLECTOR = address(0); // @audit-issue definire FeesCollector per Sepolia, eventualmente tramite script di deploy o variabile d'ambiente
@@ -65,4 +67,10 @@ abstract contract CodeConstants {
     address public constant ETH_SEPOLIA_SIGNER = address(0); // @audit-issue definire signer per Sepolia, eventualmente tramite script di deploy o variabile d'ambiente
     address public constant POLYGON_AMOY_SIGNER = address(0);
     address public constant ANVIL_SIGNER = 0xa0Ee7A142d267C1f36714E4a8F75612F20a79720; // account 9 in Anvil default accounts
+
+    // Deployer addresses
+    address public constant ETH_SEPOLIA_DEPLOYER_ADDRESS = fromEnv("ETH_SEPOLIA_DEPLOYER_ADDRESS");
+    address public constant POLYGON_AMOY_DEPLOYER_ADDRESS = fromEnv("POLYGON_AMOY_DEPLOYER_ADDRESS"); 
+    address public constant ANVIL_DEPLOYER_ADDRESS = 0x1804c8AB1F12E6bbf3894d4083f33e07309d1f38; // account 0 in Anvil default accounts
+
 }

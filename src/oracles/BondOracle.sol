@@ -12,14 +12,20 @@ contract BondOracle is IBondOracle, ERC165, AccessControl {
     bytes32 public constant UPDATER_ROLE = keccak256("UPDATER_ROLE");
 
     BondYieldsResponse internal s_bondYieldsResponse;
-    address internal immutable i_functionsConsumer;
+    address internal s_functionsConsumer;
+    bool private s_consumerSet;
 
-    constructor(address _functionsConsumer) {
-        if (_functionsConsumer == address(0))
-            revert BondOracle__ZeroAddress();
+    constructor() {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _grantRole(UPDATER_ROLE, _functionsConsumer);
-        i_functionsConsumer = _functionsConsumer;
+    }
+
+    function setFunctionsConsumer(address _consumer) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (s_consumerSet) revert BondOracle__ConsumerAlreadySet();
+        if (_consumer == address(0)) revert BondOracle__ZeroAddress();
+        _grantRole(UPDATER_ROLE, _consumer);
+        s_functionsConsumer = _consumer;
+        s_consumerSet = true;
+        emit ConsumerSet(_consumer);
     }
 
     /// @dev Inherited from IBondOracle. See interface for details.
@@ -97,7 +103,7 @@ contract BondOracle is IBondOracle, ERC165, AccessControl {
 
     /// @dev Inherited from IBondOracle. See interface for details.
     function getFunctionsConsumer() public view returns (address) {
-        return i_functionsConsumer;
+        return s_functionsConsumer;
     }
 
 

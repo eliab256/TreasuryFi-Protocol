@@ -27,6 +27,12 @@ interface IBondFunctionsConsumer {
      */
     function setSubscriptionId(uint64 subscriptionId) external;
 
+    /**
+     * @notice Grants AUTOMATION_ROLE to the given automation contract.
+     * @param _automationContract The address of the BondAutomation contract.
+     */
+    function setAutomationContract(address _automationContract) external;
+
     // Actions
     /**
      * @notice Sends a request to the Chainlink Functions oracle.
