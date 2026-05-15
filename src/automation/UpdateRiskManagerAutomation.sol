@@ -8,9 +8,9 @@ import {IUpdateRiskManagerAutomation} from "../interfaces/IUpdateRiskManagerAuto
 import {ITreasuryBondToken} from "../interfaces/ITreasuryBondToken.sol";
 
 /**
- * @title UpdateRiskManager
+ * @title UpdateRiskManagerAutomation
  */
- contract UpdateRiskManager is IUpdateRiskManagerAutomation, AccessControl{
+ contract UpdateRiskManagerAutomation is IUpdateRiskManagerAutomation, AccessControl{
 
     bytes32 public constant AUTOMATION_ROLE = keccak256("AUTOMATION_ROLE");
 

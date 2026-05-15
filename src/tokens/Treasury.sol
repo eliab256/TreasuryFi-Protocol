@@ -21,7 +21,6 @@ contract Treasury is AccessControl, ITreasury {
     bytes32 public constant TOKEN_CONTRACT_ROLE = keccak256("TOKEN_CONTRACT_ROLE");
     bytes32 public constant FEES_COLLECTOR_ROLE = keccak256("FEES_COLLECTOR_ROLE");
     bytes32 public constant LIQUIDITY_DEPOSITOR_ROLE = keccak256("LIQUIDITY_DEPOSITOR_ROLE");
-    address private immutable i_treasuryBondToken;
     IERC20 private immutable i_usdc;
     
     // Fee variables packed in a single storage slot
@@ -42,13 +41,17 @@ contract Treasury is AccessControl, ITreasury {
         _;
     }
 
-    constructor(address _treasuryBondToken, address _usdc, address _feeCollector, address _liquidityDepositor) {
-        i_treasuryBondToken = _treasuryBondToken;
+    constructor( address _usdc, address _feeCollector, address _liquidityDepositor) {
         i_usdc = IERC20(_usdc);
         _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _setupRole(TOKEN_CONTRACT_ROLE, _treasuryBondToken);
         _setupRole(FEES_COLLECTOR_ROLE, _feeCollector);
         _setupRole(LIQUIDITY_DEPOSITOR_ROLE, _liquidityDepositor);
+    }
+
+    /// @dev Inherited from ITreasury. See interface for details.
+    function setTokenContract(address _tokenContract) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (_tokenContract == address(0)) revert Treasury__ZeroAddress();
+        grantRole(TOKEN_CONTRACT_ROLE, _tokenContract);
     }
 
     /// @dev Inherited from ITreasury. See interface for details.

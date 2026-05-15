@@ -1,5 +1,5 @@
 //SPDX-License-Identifier: MIT
-pragma solidity >=0.8.17 <0.9.0;
+pragma solidity ^0.8.0;
 
 abstract contract CodeConstants {
     // Chain IDs
@@ -38,9 +38,9 @@ abstract contract CodeConstants {
     address public constant POLYGON_AMOY_FUNCIONS_ROUTER = 0xC22a79eBA640940ABB6dF0f7982cc119578E11De;
 
     //Chainlink DON IDs
-    uint256 public constant ETH_SEPOLIA_DON_ID = 
+    bytes32 public constant ETH_SEPOLIA_DON_ID = 
      0x66756e2d657468657265756d2d7365706f6c69612d3100000000000000000000;
-    uint256 public constant POLYGON_AMOY_DON_ID = 
+    bytes32 public constant POLYGON_AMOY_DON_ID = 
         0x66756e2d706f6c79676f6e2d616d6f792d310000000000000000000000000000;
 
     // USDC contract addresses
@@ -57,7 +57,7 @@ abstract contract CodeConstants {
     uint8 internal constant BASE_TOKEN_DECIMALS = 18;
     uint8 public constant PRICE_FEED_DECIMALS = 8;
     uint256 public constant API_UPDATE_INTERVAL = 24 hours;
-    uint256 public constant LINK_FUNDING_AMOUNT_FOR_EACH_UPKEEP = 5 * 10 ** 18; // 5 LINK
+    uint96 public constant LINK_FUNDING_AMOUNT_FOR_EACH_UPKEEP = 5 * 10 ** 18; // 5 LINK
 
     // FeesCollector address
     address public constant ETH_SEPOLIA_FEES_COLLECTOR = address(0); // @audit-issue definire FeesCollector per Sepolia, eventualmente tramite script di deploy o variabile d'ambiente
@@ -69,8 +69,7 @@ abstract contract CodeConstants {
     address public constant ANVIL_SIGNER = 0xa0Ee7A142d267C1f36714E4a8F75612F20a79720; // account 9 in Anvil default accounts
 
     // Deployer addresses
-    address public constant ETH_SEPOLIA_DEPLOYER_ADDRESS = fromEnv("ETH_SEPOLIA_DEPLOYER_ADDRESS");
-    address public constant POLYGON_AMOY_DEPLOYER_ADDRESS = fromEnv("POLYGON_AMOY_DEPLOYER_ADDRESS"); 
+    // for sepolia and polygon amoy, the deployer address will be read from an environment variable in HelperConfig
     address public constant ANVIL_DEPLOYER_ADDRESS = 0x1804c8AB1F12E6bbf3894d4083f33e07309d1f38; // account 0 in Anvil default accounts
 
 }

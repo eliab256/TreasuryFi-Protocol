@@ -78,7 +78,6 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
             _params.reservesAutomation == address(0) ||
             _params.reservesOracle == address(0) ||
             _params.bondOracle == address(0) ||
-            _params.updateRiskManagerAutomation == address(0) ||
             _params.treasury == address(0)
         ) revert TreasuryBondToken__ZeroAddress();
 
@@ -114,10 +113,14 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         _grantRole(OWNER_ROLE, msg.sender);
         _grantRole(FEES_MANAGER_ROLE, _params.feesCollector);
         _grantRole(AUTOMATION_TRIGGERER_ROLE, msg.sender);
-        _grantRole(UPDATE_RISK_MANAGER_VALUES_ROLE, _params.updateRiskManagerAutomation);
         _grantRole(UPDATE_RISK_MANAGER_VALUES_ROLE, msg.sender);
 
         i_minimumDepositAmount = 10 * (10 ** i_usdcDecimals); // 10 USDC with decimals
+    }
+
+    function setUpdateRiskManagerAutomation(address _updateRiskManagerAutomation) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (_updateRiskManagerAutomation == address(0)) revert TreasuryBondToken__ZeroAddress();
+        _grantRole(UPDATE_RISK_MANAGER_VALUES_ROLE, _updateRiskManagerAutomation);
     }
 
     function supportsInterface(

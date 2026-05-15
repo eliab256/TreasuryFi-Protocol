@@ -7,7 +7,7 @@ import {TreasuryBondTokenConstructorParams} from "../src/types.sol";
 import {MockV3Aggregator} from "../test/mocks/MockV3Aggregator.sol";
 import {MockERC20} from "../test/mocks/MockERC20.sol";
 import {MockFunctionsRouter} from "../test/mocks/MockFunctionsRouter.sol";
-import {IKeeperRegistryMaster} from "@chainlink/contracts/src/v0.8/interfaces/KeeperRegistryInterface.sol";
+import {IKeeperRegistryMaster} from "@chainlink/contracts/src/v0.8/automation/interfaces/v2_1/IKeeperRegistryMaster.sol";
 
 /**
  * @title HelperConfig
@@ -25,20 +25,13 @@ contract HelperConfig is CodeConstants, Script {
         uint256 apiUpdateInterval;
         address usdcAddress;
         address usdcPriceFeedAddress;
-        //address identityRegistry;
-        // address bondAutomation;
-        // address reservesAutomation;
-        // address updateRiskManagerAutomation;
-        // address reservesOracle;
-        // address bondOracle;
-        // address treasury;
         address feesCollector;
         address automationRegistry;
         address automationRegistrar;
         address linkToken; 
-        address fundingAmountForEachUpkeep;
+        uint96 fundingAmountForEachUpkeep;
         address functionsRouter;
-        uint256 donId;
+        bytes32 donId;
         uint32 gasLimit;
         address signer;
     }
@@ -90,9 +83,9 @@ contract HelperConfig is CodeConstants, Script {
         }
     }
 
-    function getEthSepoliaConfig() internal pure returns (NetworkConfig memory) {
+    function getEthSepoliaConfig() internal view returns (NetworkConfig memory) {
         return NetworkConfig({
-            deployer: ETH_SEPOLIA_DEPLOYER_ADDRESS,
+            deployer: vm.envAddress("ETH_SEPOLIA_DEPLOYER_ADDRESS"),
             name: BASE_TOKEN_NAME,
             symbol: BASE_TOKEN_SYMBOL,
             decimals: BASE_TOKEN_DECIMALS,
@@ -112,8 +105,9 @@ contract HelperConfig is CodeConstants, Script {
     }
 
 
-    function getPolygonAmoyConfig() internal pure returns (NetworkConfig memory) {
+    function getPolygonAmoyConfig() internal view returns (NetworkConfig memory) {
         return NetworkConfig({
+            deployer: vm.envAddress("POLYGON_AMOY_DEPLOYER_ADDRESS"),
             name: BASE_TOKEN_NAME,
             symbol: BASE_TOKEN_SYMBOL,
             decimals: BASE_TOKEN_DECIMALS,
@@ -139,7 +133,7 @@ contract HelperConfig is CodeConstants, Script {
       
         if(address(mockUsdcPriceFeed) == address(0)) {
             mockUsdcPriceFeed = new MockV3Aggregator(
-                PRICE_FEED_DECIMALS, 1 * 10 ** PRICE_FEED_DECIMALS); // 1USDC = 1USD
+               PRICE_FEED_DECIMALS, int256(1 * 10 ** PRICE_FEED_DECIMALS)); // 1USDC = 1USD
         }
 
         anvilFeeCollector = makeAddr("feeCollector");
@@ -156,6 +150,7 @@ contract HelperConfig is CodeConstants, Script {
         anvilRegistrarMock = makeAddr('registrarMock');
         
         return NetworkConfig({
+            deployer: ANVIL_DEPLOYER_ADDRESS,
             name: BASE_TOKEN_NAME,
             symbol: BASE_TOKEN_SYMBOL,
             decimals: BASE_TOKEN_DECIMALS,
@@ -178,6 +173,10 @@ contract HelperConfig is CodeConstants, Script {
         return (mockUsdc, mockUsdcPriceFeed, mockFunctionsRouter);
     }
 
+    function getActiveNetworkConfig() public view returns (NetworkConfig memory) {
+        return activeNetworkConfig;
+    }
+
     function getForwarderFromUpkeepId(uint256 _upkeepId) public view returns (address) {
         if (block.chainid != ANVIL_CHAIN_ID) {
             IKeeperRegistryMaster registry = IKeeperRegistryMaster(activeNetworkConfig.automationRegistry);
@@ -196,7 +195,7 @@ contract HelperConfig is CodeConstants, Script {
         if (block.chainid != ANVIL_CHAIN_ID) {
             return activeNetworkConfig.automationRegistrar;
         } else {
-            return registrarMock;
+            return anvilRegistrarMock;
         }
     }
 
@@ -209,7 +208,7 @@ contract HelperConfig is CodeConstants, Script {
         if (block.chainid != ANVIL_CHAIN_ID) {
             return activeNetworkConfig.automationRegistry;
         } else {
-            return registryMock;
+            return anvilRegistryMock;
         }
     }
 }

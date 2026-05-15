@@ -3,6 +3,7 @@ pragma solidity ^0.8.0;
 
 interface ITreasury {
     // ------ Errors ------
+    error Treasury__ZeroAddress();
     error Treasury__AmountExceedsTotalFeesToBeCollected();
     error Treasury__AmountExceedsFeesToBeCollected();
     error Treasury__InsufficientLiquidity();
@@ -19,6 +20,13 @@ interface ITreasury {
 
 
     // ------ Main functions ------
+
+    /**
+     * @notice Sets the token contract address that is allowed to interact with the treasury.
+     * @dev Only callable by admin. This is used to set the TreasuryBondToken contract as the only contract that can call the treasury's main functions.
+     * @param _tokenContract The address of the token contract.
+     */
+    function setTokenContract(address _tokenContract) external;
 
     /**
      * @notice Handles USDC deposits when opening a new position. 

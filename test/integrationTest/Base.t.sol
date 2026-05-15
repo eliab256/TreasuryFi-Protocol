@@ -11,6 +11,8 @@ import {IReservesAutomation} from "../../src/interfaces/IReservesAutomation.sol"
 import {IBondFunctionsConsumer} from "../../src/interfaces/IBondFunctionsConsumer.sol";
 import {IReservesFunctionsConsumer} from "../../src/interfaces/IReservesFunctionsConsumer.sol";
 import {IUpdateRiskManagerAutomation} from "../../src/interfaces/IUpdateRiskManagerAutomation.sol";
+import {DeployProtocol} from "../../script/DeployProtocol.s.sol";
+import {HelperConfig} from "../../script/HelperConfig.sol";
 
 import {TokenConstants as C} from "../../src/tokens/TokenConstants.sol";
 
@@ -24,8 +26,27 @@ contract Base is Test {
     IBondFunctionsConsumer internal bondFunctionsConsumer;
     IReservesFunctionsConsumer internal reservesFunctionsConsumer;
     IUpdateRiskManagerAutomation internal updateRiskManagerAutomation;
+    HelperConfig internal helperConfig;
+    address internal deployer;
+    uint256 internal upkeepId;
+    address internal forwarder;
 
     function setUp() public {
-      
+        DeployProtocol deployProtocol = new DeployProtocol();
+        (
+            treasuryBondToken,
+            treasury,
+            bondOracle,
+            reservesOracle,
+            bondAutomation,
+            reservesAutomation,
+            bondFunctionsConsumer,
+            reservesFunctionsConsumer,
+            updateRiskManagerAutomation,
+            helperConfig,
+            deployer,
+            upkeepId,
+            forwarder
+        ) = deployProtocol.run();
     }
 }

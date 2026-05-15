@@ -2,26 +2,29 @@
 pragma solidity ^0.8.0;
 
 import {Script} from "forge-std/Script.sol";
+import {console} from "forge-std/console.sol";
 import {HelperConfig} from "./HelperConfig.sol";
 import { AutomationRegistration } from './AutomationRegistration.sol';
 import {LinkTokenInterface} from "@chainlink/contracts/src/v0.8/shared/interfaces/LinkTokenInterface.sol";
-import {IFunctionSubscriptions} from "@chainlink/contracts/src/v0.8/functions/dev/v1_X/interfaces/IFunctionsSubscriptions.sol";
+import {IFunctionsSubscriptions} from "@chainlink/contracts/src/v0.8/functions/dev/v1_X/interfaces/IFunctionsSubscriptions.sol";
 import {BondOracle} from "../src/oracles/BondOracle.sol";
 import {ReservesOracle} from "../src/oracles/ReservesOracle.sol";
 import {BondAutomation} from "../src/automation/BondAutomation.sol";
 import {ReservesAutomation} from "../src/automation/ReservesAutomation.sol";
 import {BondFunctionsConsumer} from "../src/oracles/BondFunctionsConsumer.sol";
 import {ReservesFunctionsConsumer} from "../src/oracles/ReservesFunctionsConsumer.sol";
-import {CodeConstants} from "./CodeConstants.sol";
+
 
 contract DeployOracles is Script {
-    bool isNotAnvil = block.chainid != ANVIL_CHAIN_ID;
+    error InsufficientLinkBalance(uint256 required, uint256 actual);
+
+    bool isNotAnvil = block.chainid != 31337;
 
     function run() external returns (BondOracle, ReservesOracle, BondFunctionsConsumer, 
         ReservesFunctionsConsumer, BondAutomation, ReservesAutomation, uint256, uint256, address, address) { 
 
         HelperConfig helperConfig = new HelperConfig();
-        HelperConfig.NetworkConfig memory config = helperConfig.activeNetworkConfig();
+        HelperConfig.NetworkConfig memory config = helperConfig.getActiveNetworkConfig();
 
         vm.startBroadcast(config.deployer);
 
@@ -57,7 +60,7 @@ contract DeployOracles is Script {
     function deployOracles(HelperConfig helperConfig) public 
         returns(BondOracle, ReservesOracle, BondFunctionsConsumer, ReservesFunctionsConsumer, BondAutomation, ReservesAutomation,
         uint256 reservesUpkeepId, uint256 bondUpkeepId, address reservesForwarder, address bondForwarder) {
-        HelperConfig.NetworkConfig memory config = helperConfig.activeNetworkConfig();
+        HelperConfig.NetworkConfig memory config = helperConfig.getActiveNetworkConfig();
     
             console.log('======================= Oracles Deployment =================');
         console.log('======================= Oracles Stacks Contracts Deployment =================');
@@ -69,8 +72,8 @@ contract DeployOracles is Script {
         console.log("ReservesOracle deployed at:", address(reservesOracle));
 
         // deploy functions consumers
-        BondFunctionsConsumer bondFunctionsConsumer = new BondFunctionsConsumer(config.router, config.donId, config.gasLimit, address(bondOracle));
-        ReservesFunctionsConsumer reservesFunctionsConsumer = new ReservesFunctionsConsumer(config.router, config.donId, config.gasLimit, address(reservesOracle));
+        BondFunctionsConsumer bondFunctionsConsumer = new BondFunctionsConsumer(config.functionsRouter, config.donId, config.gasLimit, address(bondOracle));
+        ReservesFunctionsConsumer reservesFunctionsConsumer = new ReservesFunctionsConsumer(config.functionsRouter, config.donId, config.gasLimit, address(reservesOracle));
 
         console.log("BondFunctionsConsumer deployed at:", address(bondFunctionsConsumer));
         console.log("ReservesFunctionsConsumer deployed at:", address(reservesFunctionsConsumer));
@@ -83,8 +86,8 @@ contract DeployOracles is Script {
         console.log("Set FunctionsConsumer in ReservesOracle asdress:", address(reservesFunctionsConsumer));
 
         // deploy automation
-        BondAutomation bondAutomation = new BondAutomation(address(bondFunctionsConsumer), msg.sender, _interval);
-        ReservesAutomation reservesAutomation = new ReservesAutomation(address(reservesFunctionsConsumer), msg.sender, _interval);
+        BondAutomation bondAutomation = new BondAutomation(address(bondFunctionsConsumer), msg.sender, config.apiUpdateInterval);
+        ReservesAutomation reservesAutomation = new ReservesAutomation(address(reservesFunctionsConsumer), msg.sender, config.apiUpdateInterval);
 
         console.log("BondAutomation deployed at:", address(bondAutomation));
         console.log("ReservesAutomation deployed at:", address(reservesAutomation));
@@ -162,10 +165,10 @@ contract DeployOracles is Script {
         console.log('==================== Registering Chainlink Automation ====================');
         console.log('Registering Chainlink Automation...');
         console.log('Upkeep Contract:', _upkeepContract);
-        console.log('Admin:', _config.deployerAccount);
+        console.log('Admin:', _config.deployer);
         console.log(
             'Admin Link Balance: ',
-            LinkTokenInterface(_config.linkToken).balanceOf(_config.deployerAccount) / 1e18,
+            LinkTokenInterface(_config.linkToken).balanceOf(_config.deployer) / 1e18,
             ' LINK'
         );
         console.log('Funding Amount:', _config.fundingAmountForEachUpkeep / 1e18, 'LINK');
@@ -179,7 +182,7 @@ contract DeployOracles is Script {
 
         // 2. Check LINK balance
         LinkTokenInterface link = LinkTokenInterface(_config.linkToken);
-        uint256 linkBalance = link.balanceOf(_config.deployerAccount);
+        uint256 linkBalance = link.balanceOf(_config.deployer);
 
         console.log('Link balance of admin:', linkBalance / 1e18, 'LINK');
         console.log('Required funding amount:', _config.fundingAmountForEachUpkeep / 1e18, 'LINK');
@@ -198,7 +201,7 @@ contract DeployOracles is Script {
             _upkeepContract,
             _name,
             _config.gasLimit,
-            _config.deployerAccount,
+            _config.deployer,
             _config.fundingAmountForEachUpkeep
         );
 

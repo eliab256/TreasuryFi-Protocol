@@ -112,7 +112,6 @@ struct TreasuryBondTokenConstructorParams {
     address identityRegistry;
     address bondAutomation;
     address reservesAutomation;
-    address updateRiskManagerAutomation;
     address reservesOracle;
     address bondOracle;
     address feesCollector;

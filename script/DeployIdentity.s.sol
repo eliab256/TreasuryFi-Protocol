@@ -24,8 +24,14 @@ contract DeployIdentity is Script, CodeConstants {
     IdentityRegistryStorage public identityRegistryStorage;
     IdentityRegistry public identityRegistry;
 
-    function run() external {
+    function run() external returns(IdentityRegistry) {
         vm.startBroadcast();
+        identityRegistry = deployIdentity();
+        vm.stopBroadcast();
+        return identityRegistry;
+    }
+
+    function deployIdentity() public returns(IdentityRegistry) {
         // 1.2.1 Deploy ClaimTopicsRegistry and call addClaimTopic to register topic 1 (KYC)
         claimTopicsRegistry = new ClaimTopicsRegistry();
         claimTopicsRegistry.init();
@@ -59,6 +65,6 @@ contract DeployIdentity is Script, CodeConstants {
         // 1.2.6 Bind IdentityRegistryStorage to IdentityRegistry by calling bindIdentityRegistry(identityRegistry) on the storage
         identityRegistryStorage.bindIdentityRegistry(address(identityRegistry));
 
-        vm.stopBroadcast();
+        return identityRegistry;
     }
 }
