@@ -89,8 +89,6 @@ struct SlotRiskParams {
  * @dev This struct is used to pass multiple parameters to the constructor in a more organized way and avoid stack too deep issues. 
  *      It includes all the necessary parameters for initializing the contract, such as token details, addresses of related contracts,
  *      and other configuration values.
- * @param name The name of the token, e.g. "Treasury Bond Token".
- * @param symbol The symbol of the token, e.g. "TBT".
  * @param decimalsStandard The standard number of decimals to use for calculations, typically 18 for compatibility with ERC20 tokens.
  * @param usdcAddress The address of the USDC token contract, used for handling deposits and withdrawals in USDC.
  * @param usdcPriceFeedAddress The address of the Chainlink price feed for USDC, used to get the price of USDC in USD for accurate accounting and fee calculations.
@@ -104,8 +102,6 @@ struct SlotRiskParams {
  * @param treasury The address of the Treasury contract, used to manage USDC liquidity and fee accounting for the protocol.
  */
 struct TreasuryBondTokenConstructorParams {
-    string name;
-    string symbol;
     uint8 decimalsStandard; // 18 decimals standard
     address usdcAddress;
     address usdcPriceFeedAddress;

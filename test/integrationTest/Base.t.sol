@@ -17,6 +17,7 @@ import {HelperConfig} from "../../script/HelperConfig.sol";
 import {TokenConstants as C} from "../../src/tokens/TokenConstants.sol";
 
 contract Base is Test {
+    HelperConfig internal helperConfig;
     ITreasuryBondToken internal treasuryBondToken;
     ITreasury internal treasury;
     IBondOracle internal bondOracle;
@@ -26,10 +27,11 @@ contract Base is Test {
     IBondFunctionsConsumer internal bondFunctionsConsumer;
     IReservesFunctionsConsumer internal reservesFunctionsConsumer;
     IUpdateRiskManagerAutomation internal updateRiskManagerAutomation;
-    HelperConfig internal helperConfig;
+    //HelperConfig internal helperConfig;
     address internal deployer;
     uint256 internal upkeepId;
     address internal forwarder;
+
 
     function setUp() public {
         DeployProtocol deployProtocol = new DeployProtocol();

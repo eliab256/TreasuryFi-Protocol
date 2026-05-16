@@ -17,13 +17,11 @@ contract BondAutomation is IBondAutomation, BaseAutomation {
      * @notice Constructor for the BondAutomation contract.
      * @param _functionsConsumer The address of the BondFunctionsConsumer contract.
      * @param initialAdmin The initial admin address passed to the BaseAutomation constructor.
-     * @param _interval The interval between upkeeps to enable manual triggering. Passed to the BaseAutomation constructor.
      */
     constructor(
         address _functionsConsumer,
-        address initialAdmin,
-        uint256 _interval
-    ) BaseAutomation(initialAdmin, _interval) {
+        address initialAdmin
+    ) BaseAutomation(initialAdmin) {
         if (_functionsConsumer == address(0))
             revert BondAutomation__ZeroAddress();
         s_functionsConsumer = _functionsConsumer;

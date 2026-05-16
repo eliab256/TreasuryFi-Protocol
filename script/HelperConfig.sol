@@ -19,10 +19,7 @@ contract HelperConfig is CodeConstants, Script {
 
     struct NetworkConfig{
         address deployer;
-        string name;
-        string symbol;
         uint8 decimals;
-        uint256 apiUpdateInterval;
         address usdcAddress;
         address usdcPriceFeedAddress;
         address feesCollector;
@@ -86,10 +83,7 @@ contract HelperConfig is CodeConstants, Script {
     function getEthSepoliaConfig() internal view returns (NetworkConfig memory) {
         return NetworkConfig({
             deployer: vm.envAddress("ETH_SEPOLIA_DEPLOYER_ADDRESS"),
-            name: BASE_TOKEN_NAME,
-            symbol: BASE_TOKEN_SYMBOL,
             decimals: BASE_TOKEN_DECIMALS,
-            apiUpdateInterval: API_UPDATE_INTERVAL,
             usdcAddress: ETH_SEPOLIA_USDC_CONTRACT,
             usdcPriceFeedAddress: ETH_SEPOLIA_USDC_PRICEFEED,
             feesCollector: ETH_SEPOLIA_FEES_COLLECTOR,
@@ -108,10 +102,7 @@ contract HelperConfig is CodeConstants, Script {
     function getPolygonAmoyConfig() internal view returns (NetworkConfig memory) {
         return NetworkConfig({
             deployer: vm.envAddress("POLYGON_AMOY_DEPLOYER_ADDRESS"),
-            name: BASE_TOKEN_NAME,
-            symbol: BASE_TOKEN_SYMBOL,
             decimals: BASE_TOKEN_DECIMALS,
-            apiUpdateInterval: API_UPDATE_INTERVAL,
             usdcAddress: POLYGON_AMOY_USDC_CONTRACT,
             usdcPriceFeedAddress: POLYGON_AMOY_USDC_PRICEFEED,
             feesCollector: POLYGON_AMOY_FEES_COLLECTOR,
@@ -151,10 +142,7 @@ contract HelperConfig is CodeConstants, Script {
         
         return NetworkConfig({
             deployer: ANVIL_DEPLOYER_ADDRESS,
-            name: BASE_TOKEN_NAME,
-            symbol: BASE_TOKEN_SYMBOL,
             decimals: BASE_TOKEN_DECIMALS,
-            apiUpdateInterval: API_UPDATE_INTERVAL,
             usdcAddress: address(mockUsdc),
             usdcPriceFeedAddress: address(mockUsdcPriceFeed),
             feesCollector: anvilFeeCollector,

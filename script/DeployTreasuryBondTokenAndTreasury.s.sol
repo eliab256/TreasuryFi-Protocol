@@ -75,8 +75,6 @@ contract DeployTreasuryBondTokenAndTreasury is Script {
         console.log('================== Building TreasuryBondToken Deployment Params ==============');
 
         TreasuryBondTokenConstructorParams memory params = TreasuryBondTokenConstructorParams({
-            name: config.name,
-            symbol: config.symbol,
             decimalsStandard: config.decimals,
             usdcAddress: config.usdcAddress,
             usdcPriceFeedAddress: config.usdcPriceFeedAddress,

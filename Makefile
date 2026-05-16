@@ -10,6 +10,10 @@ REGISTER_INVESTOR     := script/RegisterInvetsor.s.sol
 build:
 	forge build
 
+# Usage: make build-script NAME=DeployProtocol
+build-script:
+	forge build --contracts script/$(NAME).s.sol
+
 test:
 	forge test -vv
 

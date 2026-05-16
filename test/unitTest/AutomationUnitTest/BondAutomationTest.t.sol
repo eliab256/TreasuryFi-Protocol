@@ -17,8 +17,7 @@ contract BondAutomationTest is BaseTest {
         super.setUp();
         bondAutomation = new BondAutomation(
             address(mockBondConsumer),
-            ADMIN,
-            INTERVAL
+            ADMIN
         );
     }
 
@@ -48,7 +47,7 @@ contract BondAutomationTest is BaseTest {
 
     function test_Constructor_RevertsWhenFunctionsConsumerIsZeroAddress() public {
         vm.expectRevert(BondAutomation__ZeroAddress.selector);
-        new BondAutomation(address(0), ADMIN, INTERVAL);
+        new BondAutomation(address(0), ADMIN);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

@@ -14,14 +14,14 @@ abstract contract BaseAutomation is IBaseAutomation, AccessControl {
         keccak256("AUTOMATION_ROLE");
 
     uint256 internal constant GRACE_PERIOD = 6 hours;
+    uint256 internal constant INTERVAL = 24 hours;
 
     address private s_chainlinkForwarder;
     uint256 private s_upkeepId;
-    uint256 internal immutable i_interval;
+   
     uint256 internal s_lastUpkeep;
 
-    constructor(address initialAdmin, uint256 _interval) {
-        i_interval = _interval;
+    constructor(address initialAdmin) {
         _grantRole(DEFAULT_ADMIN_ROLE, initialAdmin);
         _grantRole(AUTOMATION_ROLE, initialAdmin);
     }
@@ -57,7 +57,7 @@ abstract contract BaseAutomation is IBaseAutomation, AccessControl {
     function checkUpkeep(
         bytes calldata
     ) public view override returns (bool upkeepNeeded, bytes memory) {
-        upkeepNeeded = block.timestamp >= (s_lastUpkeep + i_interval);
+        upkeepNeeded = block.timestamp >= (s_lastUpkeep + INTERVAL);
         return (upkeepNeeded, "");
     }
 
@@ -74,7 +74,7 @@ abstract contract BaseAutomation is IBaseAutomation, AccessControl {
         }
 
         bool withinGracePeriod = block.timestamp <
-            (s_lastUpkeep + GRACE_PERIOD + i_interval);
+            (s_lastUpkeep + GRACE_PERIOD + INTERVAL);
 
         if (withinGracePeriod) {
             // During grace period: only Chainlink Automation can call
@@ -116,8 +116,8 @@ abstract contract BaseAutomation is IBaseAutomation, AccessControl {
     }
 
     /// @dev Inherited from IBaseAutomation. See interface for details.
-    function getInterval() external view returns (uint256) {
-        return i_interval;
+    function getInterval() external pure returns (uint256) {
+        return INTERVAL;
     }
 
     /// @dev Inherited from IBaseAutomation. See interface for details.
@@ -127,6 +127,6 @@ abstract contract BaseAutomation is IBaseAutomation, AccessControl {
     
     /// @dev Inherited from IBaseAutomation. See interface for details.
     function getAllUpkeepInfo() external view returns (uint256 interval, uint256 gracePeriod, uint256 lastUpkeep) {
-        return (i_interval, GRACE_PERIOD, s_lastUpkeep);
+        return (INTERVAL, GRACE_PERIOD, s_lastUpkeep);
     }
 }

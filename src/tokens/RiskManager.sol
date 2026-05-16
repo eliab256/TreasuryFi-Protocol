@@ -328,70 +328,47 @@ abstract contract RiskManager {
 
         // 4. All slots valid — update storage with new data (convert USD8 → USD18)
         if (!freezeSlot1 && !freezeSlot2 && !freezeSlot3 && !freezeSlot4) {
-            s_lastValidReserves = ReservesResponse({
-                twoYearUsdBondsValue:    newReservesResponse.twoYearUsdBondsValue    * USD8_TO_USD18,
-                fiveYearUsdBondsValue:   newReservesResponse.fiveYearUsdBondsValue   * USD8_TO_USD18,
-                tenYearUsdBondsValue:    newReservesResponse.tenYearUsdBondsValue    * USD8_TO_USD18,
-                thirtyYearUsdBondsValue: newReservesResponse.thirtyYearUsdBondsValue * USD8_TO_USD18,
-                twoYearUsdCashValue:    newReservesResponse.twoYearUsdCashValue    * USD8_TO_USD18,
-                fiveYearUsdCashValue:   newReservesResponse.fiveYearUsdCashValue   * USD8_TO_USD18,
-                tenYearUsdCashValue:    newReservesResponse.tenYearUsdCashValue    * USD8_TO_USD18,
-                thirtyYearUsdCashValue: newReservesResponse.thirtyYearUsdCashValue * USD8_TO_USD18,
-                cashBufferUsdTotalValue: newReservesResponse.cashBufferUsdTotalValue * USD8_TO_USD18,
-                totalUsdBondsValue:      newReservesResponse.totalUsdBondsValue      * USD8_TO_USD18,
-                totalUsdPortfolioValue:  newReservesResponse.totalUsdPortfolioValue  * USD8_TO_USD18,
-                timestamp: newReservesResponse.timestamp
-            });
+            s_lastValidReserves.twoYearUsdBondsValue    = newReservesResponse.twoYearUsdBondsValue    * USD8_TO_USD18;
+            s_lastValidReserves.fiveYearUsdBondsValue   = newReservesResponse.fiveYearUsdBondsValue   * USD8_TO_USD18;
+            s_lastValidReserves.tenYearUsdBondsValue    = newReservesResponse.tenYearUsdBondsValue    * USD8_TO_USD18;
+            s_lastValidReserves.thirtyYearUsdBondsValue = newReservesResponse.thirtyYearUsdBondsValue * USD8_TO_USD18;
+            s_lastValidReserves.twoYearUsdCashValue     = newReservesResponse.twoYearUsdCashValue     * USD8_TO_USD18;
+            s_lastValidReserves.fiveYearUsdCashValue    = newReservesResponse.fiveYearUsdCashValue    * USD8_TO_USD18;
+            s_lastValidReserves.tenYearUsdCashValue     = newReservesResponse.tenYearUsdCashValue     * USD8_TO_USD18;
+            s_lastValidReserves.thirtyYearUsdCashValue  = newReservesResponse.thirtyYearUsdCashValue  * USD8_TO_USD18;
+            s_lastValidReserves.cashBufferUsdTotalValue = newReservesResponse.cashBufferUsdTotalValue * USD8_TO_USD18;
+            s_lastValidReserves.totalUsdBondsValue      = newReservesResponse.totalUsdBondsValue      * USD8_TO_USD18;
+            s_lastValidReserves.totalUsdPortfolioValue  = newReservesResponse.totalUsdPortfolioValue  * USD8_TO_USD18;
+            s_lastValidReserves.timestamp               = newReservesResponse.timestamp;
             return (false, false, false, false);
         }
 
-        // 5. At least one anomaly — build mixed response
-        // frozen slots keep old values (already USD18), healthy slots get new values (convert USD8 → USD18)
-        ReservesResponse memory cached = s_lastValidReserves;
-        s_lastValidReserves = ReservesResponse({
-            twoYearUsdBondsValue:    freezeSlot1 ? cached.twoYearUsdBondsValue    : newReservesResponse.twoYearUsdBondsValue    * USD8_TO_USD18,
-            fiveYearUsdBondsValue:   freezeSlot2 ? cached.fiveYearUsdBondsValue   : newReservesResponse.fiveYearUsdBondsValue   * USD8_TO_USD18,
-            tenYearUsdBondsValue:    freezeSlot3 ? cached.tenYearUsdBondsValue    : newReservesResponse.tenYearUsdBondsValue    * USD8_TO_USD18,
-            thirtyYearUsdBondsValue: freezeSlot4 ? cached.thirtyYearUsdBondsValue : newReservesResponse.thirtyYearUsdBondsValue * USD8_TO_USD18,
-
-            twoYearUsdCashValue:    freezeSlot1 ? cached.twoYearUsdCashValue    : newReservesResponse.twoYearUsdCashValue    * USD8_TO_USD18,
-            fiveYearUsdCashValue:   freezeSlot2 ? cached.fiveYearUsdCashValue   : newReservesResponse.fiveYearUsdCashValue   * USD8_TO_USD18,
-            tenYearUsdCashValue:    freezeSlot3 ? cached.tenYearUsdCashValue    : newReservesResponse.tenYearUsdCashValue    * USD8_TO_USD18,
-            thirtyYearUsdCashValue: freezeSlot4 ? cached.thirtyYearUsdCashValue : newReservesResponse.thirtyYearUsdCashValue * USD8_TO_USD18,
-
-            // total cash buffer: se almeno uno slot è frozen, tieni il valore cached
-            cashBufferUsdTotalValue: (freezeSlot1 || freezeSlot2 || freezeSlot3 || freezeSlot4)
-                ? cached.cashBufferUsdTotalValue
-                : newReservesResponse.cashBufferUsdTotalValue * USD8_TO_USD18,
-
-            // NOTE: Latent inconsistency — aggregate totals in the mixed-response branch.
-            // When 1–3 slots are frozen, per-slot stored values for frozen slots keep the cached
-            // (old) value, while totalUsdBondsValue and totalUsdPortfolioValue are taken from
-            // newReservesResponse (oracle total), which still includes the NEW value of those
-            // frozen slots (potentially anomalous).
-            // Result: totalUsdBondsValue ≠ sum of per-slot stored values.
-            //
-            // This is NOT an active vulnerability in the current codebase:
-            // _isSolvent() — the only consumer of totalUsdPortfolioValue — always reverts first
-            // on the frozenByReserves guard when any slot is frozen, so the inconsistent total
-            // is written to storage but never read in a dangerous execution path.
-            //
-            // Risk surface: a future external getter exposing totalUsdBondsValue or
-            // totalUsdPortfolioValue without the frozenByReserves guard would return a value
-            // inconsistent with the sum of per-slot stored values.
-
-            // total bonds value: solo se tutti frozen tieni cached, altrimenti ricalcola
-            totalUsdBondsValue: (freezeSlot1 && freezeSlot2 && freezeSlot3 && freezeSlot4)
-                ? cached.totalUsdBondsValue
-                : newReservesResponse.totalUsdBondsValue * USD8_TO_USD18,
-
-            // total portfolio value: solo se tutti frozen tieni cached, altrimenti ricalcola
-            totalUsdPortfolioValue: (freezeSlot1 && freezeSlot2 && freezeSlot3 && freezeSlot4)
-                ? cached.totalUsdPortfolioValue
-                : newReservesResponse.totalUsdPortfolioValue * USD8_TO_USD18,
-
-            timestamp: cached.timestamp
-        });
+        // 5. At least one anomaly — update only non-frozen slots directly in storage.
+        // Frozen slots keep their current storage value (already USD18); no read needed.
+        if (!freezeSlot1) {
+            s_lastValidReserves.twoYearUsdBondsValue  = newReservesResponse.twoYearUsdBondsValue  * USD8_TO_USD18;
+            s_lastValidReserves.twoYearUsdCashValue   = newReservesResponse.twoYearUsdCashValue   * USD8_TO_USD18;
+        }
+        if (!freezeSlot2) {
+            s_lastValidReserves.fiveYearUsdBondsValue = newReservesResponse.fiveYearUsdBondsValue * USD8_TO_USD18;
+            s_lastValidReserves.fiveYearUsdCashValue  = newReservesResponse.fiveYearUsdCashValue  * USD8_TO_USD18;
+        }
+        if (!freezeSlot3) {
+            s_lastValidReserves.tenYearUsdBondsValue  = newReservesResponse.tenYearUsdBondsValue  * USD8_TO_USD18;
+            s_lastValidReserves.tenYearUsdCashValue   = newReservesResponse.tenYearUsdCashValue   * USD8_TO_USD18;
+        }
+        if (!freezeSlot4) {
+            s_lastValidReserves.thirtyYearUsdBondsValue = newReservesResponse.thirtyYearUsdBondsValue * USD8_TO_USD18;
+            s_lastValidReserves.thirtyYearUsdCashValue  = newReservesResponse.thirtyYearUsdCashValue  * USD8_TO_USD18;
+        }
+        // cashBufferUsdTotalValue: at least one slot frozen — keep cached (don't write)
+        // totalUsdBondsValue / totalUsdPortfolioValue: update only if not ALL slots frozen
+        // NOTE: Latent inconsistency — see original comment. Safe because _isSolvent() guards on frozenByReserves first.
+        if (!(freezeSlot1 && freezeSlot2 && freezeSlot3 && freezeSlot4)) {
+            s_lastValidReserves.totalUsdBondsValue     = newReservesResponse.totalUsdBondsValue     * USD8_TO_USD18;
+            s_lastValidReserves.totalUsdPortfolioValue = newReservesResponse.totalUsdPortfolioValue * USD8_TO_USD18;
+        }
+        // timestamp: keep cached (partial update — not all slots valid)
     }
 
 /////////////////////////////////////////////////////////////////////

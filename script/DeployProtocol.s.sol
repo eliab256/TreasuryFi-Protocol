@@ -22,6 +22,24 @@ import { AutomationRegistration } from './AutomationRegistration.sol';
 import {LinkTokenInterface} from "@chainlink/contracts/src/v0.8/shared/interfaces/LinkTokenInterface.sol";
 
 contract DeployProtocol is Script {
+    // scripts decvlarations
+    DeployIdentity deployIdentityScript;
+    DeployOracles deployOraclesScript;
+    DeployTreasuryBondTokenAndTreasury deployTreasuryAndTokenScript;
+    DeployUpdateRiskManagerAutomation deployUpdateRiskManagerAutomationScript;
+
+    // contracts declarations
+    IdentityRegistry identityRegistry;
+    TreasuryBondToken treasuryBondToken;
+    Treasury treasury;
+    BondOracle bondOracle;
+    ReservesOracle reservesOracle;
+    BondAutomation bondAutomation;
+    ReservesAutomation reservesAutomation;
+    BondFunctionsConsumer bondFunctionsConsumer;
+    ReservesFunctionsConsumer reservesFunctionsConsumer;
+    UpdateRiskManagerAutomation updateRiskManagerAutomation;
+
     function run() external returns(TreasuryBondToken, Treasury, BondOracle, 
         ReservesOracle, BondAutomation, ReservesAutomation, BondFunctionsConsumer, 
         ReservesFunctionsConsumer, UpdateRiskManagerAutomation, HelperConfig, 
@@ -30,35 +48,32 @@ contract DeployProtocol is Script {
         HelperConfig helperConfig = new HelperConfig();
         HelperConfig.NetworkConfig memory config = helperConfig.getActiveNetworkConfig();
 
-        DeployIdentity deployIdentityScript = new DeployIdentity();
-        DeployOracles deployOraclesScript = new DeployOracles();
-        DeployTreasuryBondTokenAndTreasury deployTreasuryAndTokenScript = new DeployTreasuryBondTokenAndTreasury();
-        DeployUpdateRiskManagerAutomation deployUpdateRiskManagerAutomationScript = new DeployUpdateRiskManagerAutomation();
+        deployIdentityScript = new DeployIdentity();
+        deployOraclesScript = new DeployOracles();
+        deployTreasuryAndTokenScript = new DeployTreasuryBondTokenAndTreasury();
+        deployUpdateRiskManagerAutomationScript = new DeployUpdateRiskManagerAutomation();
         deployer = config.deployer;
 
         vm.startBroadcast(deployer);
 
         // 1. Deploy identity registry and related contracts (claim topics registry,  claim issuer, 
         //    trusted issuers registry) and get the address of the deployed identity registry contract
-        IdentityRegistry identityRegistry = deployIdentityScript.deployIdentity();
+        identityRegistry = deployIdentityScript.deployIdentity();
 
         // 2. Deploy oracles, automations, and functions consumers. 
         //    If not Anvil, also registers automations in Chainlink Automation registry and 
         //    sets forwarder addresses.
-        (BondOracle bondOracle,
-        ReservesOracle reservesOracle,
-        BondFunctionsConsumer bondFunctionsConsumer,
-        ReservesFunctionsConsumer reservesFunctionsConsumer,
-        BondAutomation bondAutomation,
-        ReservesAutomation reservesAutomation,
-        uint256 bondUpkeepId,
-        uint256 reservesUpkeepId,
-        address bondForwarder,
-        address reservesForwarder) =  deployOraclesScript.deployOracles(helperConfig);
+        (bondOracle,
+        reservesOracle,
+        bondFunctionsConsumer,
+        reservesFunctionsConsumer,
+        bondAutomation,
+        reservesAutomation,
+         , , , ) =  deployOraclesScript.deployOracles(helperConfig);
 
         // 3. Deploy Treasury and TreasuryBondToken, passing in the necessary constructor arguments
-        Treasury treasury = deployTreasuryAndTokenScript.deployTreasury(config);
-        TreasuryBondToken treasuryBondToken = deployTreasuryAndTokenScript.deployToken(
+        treasury = deployTreasuryAndTokenScript.deployTreasury(config);
+        treasuryBondToken = deployTreasuryAndTokenScript.deployToken(
             helperConfig, address(identityRegistry), address(bondAutomation), 
             address(reservesAutomation), address(reservesOracle), address(bondOracle), address(treasury));
 
@@ -67,7 +82,7 @@ contract DeployProtocol is Script {
             address(treasury), address(treasuryBondToken));
 
         // 5. Deploy UpdateRiskManagerAutomation
-        (UpdateRiskManagerAutomation updateRiskManagerAutomation, , ) = 
+        (updateRiskManagerAutomation, , ) = 
             deployUpdateRiskManagerAutomationScript.deployUpdateRiskManagerAutomation(
             address(treasuryBondToken), address(reservesOracle), address(bondOracle), helperConfig);
         

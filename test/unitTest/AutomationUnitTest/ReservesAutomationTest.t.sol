@@ -17,8 +17,7 @@ contract ReservesAutomationTest is BaseTest {
         super.setUp();
         reservesAutomation = new ReservesAutomation(
             address(mockReservesConsumer),
-            ADMIN,
-            INTERVAL
+            ADMIN
         );
     }
 
@@ -51,7 +50,7 @@ contract ReservesAutomationTest is BaseTest {
 
     function test_Constructor_RevertsWhenFunctionsConsumerIsZeroAddress() public {
         vm.expectRevert(ReservesAutomation__ZeroAddress.selector);
-        new ReservesAutomation(address(0), ADMIN, INTERVAL);
+        new ReservesAutomation(address(0), ADMIN);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

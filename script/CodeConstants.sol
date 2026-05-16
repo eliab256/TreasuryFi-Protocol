@@ -52,11 +52,8 @@ abstract contract CodeConstants {
     address public constant POLYGON_AMOY_USDC_PRICEFEED = 0x1b8739bB4CdF0089d07097A9Ae5Bd274b29C6F16;
 
     // Common parameters for every chain
-    string internal constant BASE_TOKEN_NAME = "TreasuryFi Bond Token";
-    string internal constant BASE_TOKEN_SYMBOL = "TBT";
     uint8 internal constant BASE_TOKEN_DECIMALS = 18;
     uint8 public constant PRICE_FEED_DECIMALS = 8;
-    uint256 public constant API_UPDATE_INTERVAL = 24 hours;
     uint96 public constant LINK_FUNDING_AMOUNT_FOR_EACH_UPKEEP = 5 * 10 ** 18; // 5 LINK
 
     // FeesCollector address

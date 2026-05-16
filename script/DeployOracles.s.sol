@@ -86,8 +86,8 @@ contract DeployOracles is Script {
         console.log("Set FunctionsConsumer in ReservesOracle asdress:", address(reservesFunctionsConsumer));
 
         // deploy automation
-        BondAutomation bondAutomation = new BondAutomation(address(bondFunctionsConsumer), msg.sender, config.apiUpdateInterval);
-        ReservesAutomation reservesAutomation = new ReservesAutomation(address(reservesFunctionsConsumer), msg.sender, config.apiUpdateInterval);
+        BondAutomation bondAutomation = new BondAutomation(address(bondFunctionsConsumer), msg.sender);
+        ReservesAutomation reservesAutomation = new ReservesAutomation(address(reservesFunctionsConsumer), msg.sender);
 
         console.log("BondAutomation deployed at:", address(bondAutomation));
         console.log("ReservesAutomation deployed at:", address(reservesAutomation));

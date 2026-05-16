@@ -64,8 +64,8 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
      */
     constructor(
         TreasuryBondTokenConstructorParams memory _params
-    ) ERC3643(_params.name, _params.symbol, _params.decimalsStandard, address(this), _params.identityRegistry, address(0)) 
-    ERC3525(_params.name, _params.symbol, _params.decimalsStandard) 
+    ) ERC3643("TreasuryFi Bond Token", "TBT", _params.decimalsStandard, address(this), _params.identityRegistry, address(0)) 
+    ERC3525("TreasuryFi Bond Token", "TBT", _params.decimalsStandard) 
     RiskManager(_params.bondAutomation, _params.reservesAutomation, _params.reservesOracle, _params.bondOracle, _params.treasury)
     UsdcUsdConverter(_params.usdcAddress, _params.usdcPriceFeedAddress, _params.decimalsStandard){
         // Checks for zero addresses
