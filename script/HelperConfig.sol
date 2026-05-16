@@ -157,8 +157,8 @@ contract HelperConfig is CodeConstants, Script {
         });
     }
 
-    function getMocks() public view returns (MockERC20, MockV3Aggregator, MockFunctionsRouter) {
-        return (mockUsdc, mockUsdcPriceFeed, mockFunctionsRouter);
+    function getMocks() public view returns (MockERC20, MockERC20, MockV3Aggregator, MockFunctionsRouter) {
+        return (mockUsdc, mockLinkToken, mockUsdcPriceFeed, mockFunctionsRouter);
     }
 
     function getActiveNetworkConfig() public view returns (NetworkConfig memory) {
