@@ -35,6 +35,10 @@ contract BondAutomation is IBondAutomation, BaseAutomation {
         IBondFunctionsConsumer(s_functionsConsumer).sendRequest();
     }
 
+    function supportsInterface(bytes4 interfaceId) public view override returns (bool) {
+        return interfaceId == type(IBondAutomation).interfaceId || super.supportsInterface(interfaceId);
+    }
+
     // --- Getters ---
     /// @dev Inherited from IBondAutomation. See interface for details.
     function getFunctionsConsumer() external view returns (address) {

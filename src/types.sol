@@ -103,6 +103,7 @@ struct SlotRiskParams {
  */
 struct TreasuryBondTokenConstructorParams {
     uint8 decimalsStandard; // 18 decimals standard
+    address admin;
     address usdcAddress;
     address usdcPriceFeedAddress;
     address identityRegistry;

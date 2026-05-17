@@ -41,13 +41,13 @@ abstract contract UsdcUsdConverter {
         uint256 numerator = Math.mulDiv(
             usdcAmount,
             usdcPrice,
-            i_usdcDecimals
+            10 ** i_usdcDecimals
         );
 
         usdAmount = Math.mulDiv(
             numerator,
-            i_decimalsStandard,
-            i_usdcPriceFeedDecimals
+            10 ** i_decimalsStandard,
+            10 ** i_usdcPriceFeedDecimals
         );
     }
 
@@ -70,13 +70,13 @@ abstract contract UsdcUsdConverter {
 
         uint256 numerator = Math.mulDiv(
             usdAmount,
-            usdcDecimals,
-            usdDecimals
+            10 ** usdcDecimals,
+            10 ** usdDecimals
         );
 
         usdcAmount = Math.mulDiv(
             numerator,
-            priceFeedDecimals,
+            10 ** priceFeedDecimals,
             usdcPrice
         );
     }
@@ -93,7 +93,7 @@ abstract contract UsdcUsdConverter {
         uint256 usdDecimals = i_decimalsStandard;
         uint256 priceFeedDecimals = i_usdcPriceFeedDecimals;
 
-        usd8Amount = Math.mulDiv(usd18Amount, priceFeedDecimals, usdDecimals);
+        usd8Amount = Math.mulDiv(usd18Amount, 10 ** priceFeedDecimals, 10 ** usdDecimals);
     }
 
     /**
@@ -107,7 +107,7 @@ abstract contract UsdcUsdConverter {
         uint256 usdDecimals = i_decimalsStandard;
         uint256 priceFeedDecimals = i_usdcPriceFeedDecimals;
 
-        usd18Amount = Math.mulDiv(usd8Amount, usdDecimals, priceFeedDecimals);
+        usd18Amount = Math.mulDiv(usd8Amount, 10 ** usdDecimals, 10 ** priceFeedDecimals);
     }
 
     /**
@@ -121,7 +121,7 @@ abstract contract UsdcUsdConverter {
     function _convertUsdcToUsd8(uint256 usdcAmount) internal view returns (uint256 usd8Amount) {
         uint256 usdcPrice = _getLatestUsdcPrice();
 
-        usd8Amount = Math.mulDiv(usdcAmount, usdcPrice, i_usdcDecimals);
+        usd8Amount = Math.mulDiv(usdcAmount, usdcPrice, 10 ** i_usdcDecimals);
     }
 
     /**
@@ -136,7 +136,7 @@ abstract contract UsdcUsdConverter {
         uint256 usdcPrice = _getLatestUsdcPrice();
         uint256 usdcDecimals = i_usdcDecimals;
 
-        usdcAmount = Math.mulDiv(usd8Amount, usdcDecimals, usdcPrice);
+        usdcAmount = Math.mulDiv(usd8Amount, 10 ** usdcDecimals, usdcPrice);
     }
 
     /**
@@ -155,8 +155,8 @@ abstract contract UsdcUsdConverter {
 
         unchecked {
             for (uint256 i = 0; i < len; i++) {
-                uint256 numerator = Math.mulDiv(_usdAmounts[i], i_usdcDecimals, i_decimalsStandard);
-                usdcAmounts[i] = Math.mulDiv(numerator, i_usdcPriceFeedDecimals, usdcPrice);
+                uint256 numerator = Math.mulDiv(_usdAmounts[i], 10 ** i_usdcDecimals, 10 ** i_decimalsStandard);
+                usdcAmounts[i] = Math.mulDiv(numerator, 10 ** i_usdcPriceFeedDecimals, usdcPrice);
             }
         }
     }
@@ -183,13 +183,13 @@ abstract contract UsdcUsdConverter {
         unchecked {
             for (uint256 i = 0; i < _numberOfConversion; i++) {
                 uint256 usdcAmount;
-                assembly {
+                assembly ("memory-safe") {
                     // _valuesToConvert starts with a 32-byte length field (bytes memory layout).
                     // Skip it with add(..., 0x20), then read the i-th 32-byte slot.
                     usdcAmount := mload(add(add(_valuesToConvert, 0x20), mul(i, 0x20)))
                 }
-                uint256 numerator = Math.mulDiv(usdcAmount, usdcPrice, i_usdcDecimals);
-                results[i] = Math.mulDiv(numerator, i_decimalsStandard, i_usdcPriceFeedDecimals);
+                uint256 numerator = Math.mulDiv(usdcAmount, usdcPrice, 10 ** i_usdcDecimals);
+                results[i] = Math.mulDiv(numerator, 10 ** i_decimalsStandard, 10 ** i_usdcPriceFeedDecimals);
             }
         }
 
@@ -212,8 +212,8 @@ abstract contract UsdcUsdConverter {
 
         unchecked {
             for (uint256 i = 0; i < len; i++) {
-                uint256 numerator = Math.mulDiv(_usdcAmounts[i], usdcPrice, i_usdcDecimals);
-                usdAmounts[i] = Math.mulDiv(numerator, i_decimalsStandard, i_usdcPriceFeedDecimals);
+                uint256 numerator = Math.mulDiv(_usdcAmounts[i], usdcPrice, 10 ** i_usdcDecimals);
+                usdAmounts[i] = Math.mulDiv(numerator, 10 ** i_decimalsStandard, 10 ** i_usdcPriceFeedDecimals);
             }
         }
     }
@@ -237,5 +237,13 @@ abstract contract UsdcUsdConverter {
         if (block.timestamp - updatedAt > C.MAX_USDC_DELAY) revert UsdcUsdConverter__UsdcPriceIsStale();
         
         return (uint256(answer));
+    }
+
+    function _getUsdc() internal view returns (address) {
+        return address(i_usdc);
+    }
+
+    function _getUsdUsdcPriceFeed() internal view returns (address) {
+        return address(i_usdcPriceFeed);
     }
 }

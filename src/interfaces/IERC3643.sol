@@ -2,6 +2,7 @@
 pragma solidity ^0.8.0;
 
 import {IModularCompliance} from "@t-rex/compliance/modular/IModularCompliance.sol";
+import {IIdentityRegistry} from "@t-rex/registry/interface/IIdentityRegistry.sol";
 
 /**
  * @title IERC3643
@@ -71,6 +72,8 @@ interface IERC3643 {
     // --- Getters ---
 
     function compliance() external view returns (IModularCompliance);
+
+    function identityRegistry() external view returns (IIdentityRegistry);
 
     function paused() external view returns (bool);
 

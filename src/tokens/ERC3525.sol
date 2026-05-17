@@ -678,7 +678,7 @@ contract ERC3525 is Context, IERC3525, IERC721Enumerable {
                 if (reason.length == 0) {
                     revert ERC3525__TransferToNonERC721ReceiverImplementer();
                 } else {
-                    assembly {
+                    assembly ("memory-safe") {
                         revert(add(32, reason), mload(reason))
                     }
                 }
@@ -721,7 +721,7 @@ contract ERC3525 is Context, IERC3525, IERC721Enumerable {
 
     function _isContract(address addr_) private view returns (bool) {
         uint32 size;
-        assembly {
+        assembly ("memory-safe") {
             size := extcodesize(addr_)
         }
         return (size > 0);

@@ -27,6 +27,7 @@ contract DeployProtocol is Script {
     DeployOracles deployOraclesScript;
     DeployTreasuryBondTokenAndTreasury deployTreasuryAndTokenScript;
     DeployUpdateRiskManagerAutomation deployUpdateRiskManagerAutomationScript;
+    HelperConfig helperConfig;
 
     // contracts declarations
     IdentityRegistry identityRegistry;
@@ -45,7 +46,7 @@ contract DeployProtocol is Script {
         ReservesFunctionsConsumer, UpdateRiskManagerAutomation, HelperConfig, 
         address deployer, uint256 upkeepId, address forwarder) { 
 
-        HelperConfig helperConfig = new HelperConfig();
+        helperConfig = new HelperConfig();
         HelperConfig.NetworkConfig memory config = helperConfig.getActiveNetworkConfig();
 
         deployIdentityScript = new DeployIdentity();
@@ -54,7 +55,9 @@ contract DeployProtocol is Script {
         deployUpdateRiskManagerAutomationScript = new DeployUpdateRiskManagerAutomation();
         deployer = config.deployer;
 
-        vm.startBroadcast(deployer);
+        // NOTE: vm.startBroadcast is intentionally omitted here so that vm.prank(config.deployer)
+        // calls inside sub-scripts work in forge tests (vm.prank cannot be used inside
+        // vm.startBroadcast). For production, run each sub-script individually via its own run().
 
         // 1. Deploy identity registry and related contracts (claim topics registry,  claim issuer, 
         //    trusted issuers registry) and get the address of the deployed identity registry contract
@@ -85,7 +88,21 @@ contract DeployProtocol is Script {
         (updateRiskManagerAutomation, , ) = 
             deployUpdateRiskManagerAutomationScript.deployUpdateRiskManagerAutomation(
             address(treasuryBondToken), address(reservesOracle), address(bondOracle), helperConfig);
-        
-        vm.stopBroadcast();
+
+        return (
+            treasuryBondToken, 
+            treasury, 
+            bondOracle, 
+            reservesOracle, 
+            bondAutomation, 
+            reservesAutomation, 
+            bondFunctionsConsumer, 
+            reservesFunctionsConsumer, 
+            updateRiskManagerAutomation, 
+            helperConfig,
+            deployer,
+             upkeepId,
+             forwarder
+        );
     }
 }

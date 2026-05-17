@@ -81,7 +81,7 @@ interface ITreasuryBondToken is IERC3643 /*, IERC3525 */ {
     function triggerYieldsUpkeep() external;
 
     // --- Positions ---
-    function openNewPosition(address _mintTo, uint256 _slot, uint256 _value) external;
+    function openNewPosition(address _mintTo, uint256 _slot, uint256 _value) external returns(uint256 newTokenId);
     function closePosition(uint256 _tokenId) external;
     function closePartialPosition(uint256 _tokenId, uint256 _valueToBurn) external;
     function claimYield(uint256 _tokenId) external;
@@ -104,6 +104,24 @@ interface ITreasuryBondToken is IERC3643 /*, IERC3525 */ {
     // --- Getters ---
     function getTotalLiabilitiesPerSlot(uint256 _slot) external view returns (uint256);
     function getPositionData(uint256 _tokenId) external view returns (PositionData memory);
+    function getMinimumDepositAmount() external view returns (uint256);
+    function assertSolvency() external view;
+    function getNextRedemptionWindow(uint256 _slot) external view returns (uint256 nextWindowOpen, uint256 windowDuration);
+
+    // --- RiskManager contract references ---
+    function getBondAutomation() external view returns (address);
+    function getReservesAutomation() external view returns (address);
+    function getBondOracle() external view returns (address);
+    function getReservesOracle() external view returns (address);
+    function getTreasury() external view returns (address);
+    function getInterval() external view returns (uint256);
+    function getGracePeriod() external view returns (uint256);
+
+    // --- UsdcUsdConverter references ---
+    function getUsdc() external view returns (address);
+    function getUsdcPriceFeed() external view returns (address);
+    function getUsdcDecimals() external view returns (uint8);
+    function getUsdcPriceFeedDecimals() external view returns (uint8);
     // function name() external view returns (string memory);
     // function symbol() external view returns (string memory);
     // function valueDecimals() external view returns (uint8);

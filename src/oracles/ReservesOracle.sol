@@ -20,10 +20,10 @@ contract ReservesOracle is IReservesOracle, ERC165, AccessControl {
     address internal s_functionsConsumer;
     bool private s_consumerSet;
 
-    constructor(address signer) {
-        if (signer == address(0))
+    constructor(address signer, address _admin) {
+        if (signer == address(0) || _admin == address(0))
             revert ReservesOracle__ZeroAddress();
-        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(DEFAULT_ADMIN_ROLE, _admin);
         s_signer = signer;
     }
 

@@ -22,12 +22,8 @@ contract DeployUpdateRiskManagerAutomation is Script {
         helperConfig = new HelperConfig();
         HelperConfig.NetworkConfig memory config = helperConfig.getActiveNetworkConfig();
 
-        vm.startBroadcast(config.deployer);
-
         ( updateRiskManagerAutomation,  upkeepId,  forwarder) = 
             deployUpdateRiskManagerAutomation(_tokenContract, _reserveOracleContract, _bondOracleContract, helperConfig);
-
-        vm.stopBroadcast();
 
         return (updateRiskManagerAutomation, helperConfig, upkeepId, forwarder);
     }
@@ -41,25 +37,30 @@ contract DeployUpdateRiskManagerAutomation is Script {
         console.log('======================= UpdateRiskManagerAutomation Deployment =================');
 
         // 1. Deploy UpdateRiskManagerAutomation contract
+        vm.broadcast(config.deployer);
         UpdateRiskManagerAutomation updateRiskManagerAutomation = 
-                new UpdateRiskManagerAutomation( _tokenContract, _reserveOracleContract, _bondOracleContract);
+                new UpdateRiskManagerAutomation( _tokenContract, _reserveOracleContract, _bondOracleContract, config.deployer);
 
         console.log("UpdateRiskManagerAutomation deployed at:", address(updateRiskManagerAutomation));
         
         // 2. If not Anvil, register the automation in Chainlink Automation registry and set upkeep ID on the contract
-        upkeepId;
         if(isNotAnvil) {
             upkeepId = deployOraclesScript.registerAutomation(
                 address(updateRiskManagerAutomation), 
                 "UpdateRiskManagerAutomation", config);
-        }  
-        updateRiskManagerAutomation.setUpkeepId(upkeepId);
+        }
+        // skip on Anvil where upkeepId is 0
+        if (upkeepId != 0) {
+            vm.broadcast(config.deployer);
+            updateRiskManagerAutomation.setUpkeepId(upkeepId);
+        }
         console.log("UpdateRiskManagerAutomation registered with upkeepID:", upkeepId);
         console.log("Upkeep ID:", updateRiskManagerAutomation.getUpkeepId());
 
         // 3. If not Anvil, set forwarder address on the contract
         forwarder = helperConfig.getForwarderFromUpkeepId(upkeepId);
 
+        vm.broadcast(config.deployer);
         updateRiskManagerAutomation.setChainlinkForwarder(forwarder);
 
         if(forwarder != address(0)) {

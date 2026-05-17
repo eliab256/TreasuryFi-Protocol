@@ -2,38 +2,35 @@
 pragma solidity ^0.8.0;
 
 import {Test} from "forge-std/Test.sol";
-import {ITreasuryBondToken} from "../../src/interfaces/ITreasuryBondToken.sol";
-import {ITreasury} from "../../src/interfaces/ITreasury.sol";
-import {IBondOracle} from "../../src/interfaces/IBondOracle.sol";
-import {IReservesOracle} from "../../src/interfaces/IReservesOracle.sol";
-import {IBondAutomation} from "../../src/interfaces/IBondAutomation.sol";
-import {IReservesAutomation} from "../../src/interfaces/IReservesAutomation.sol";
-import {IBondFunctionsConsumer} from "../../src/interfaces/IBondFunctionsConsumer.sol";
-import {IReservesFunctionsConsumer} from "../../src/interfaces/IReservesFunctionsConsumer.sol";
-import {IUpdateRiskManagerAutomation} from "../../src/interfaces/IUpdateRiskManagerAutomation.sol";
-import {DeployProtocol} from "../../script/DeployProtocol.s.sol";
-import {HelperConfig} from "../../script/HelperConfig.sol";
-import {MockERC20} from "../mocks/MockERC20.sol";
-import {MockV3Aggregator} from "../mocks/MockV3Aggregator.sol";
-import {MockFunctionsRouter} from "../mocks/MockFunctionsRouter.sol";
-import {BondOracle} from "../../src/oracles/BondOracle.sol";
-import {ReservesOracle} from "../../src/oracles/ReservesOracle.sol";
-import {BondYieldsResponse, ReservesResponse} from "../../src/types.sol";
+import {TreasuryBondToken} from "../../../src/tokens/TreasuryBondToken.sol";
+import {Treasury} from "../../../src/tokens/Treasury.sol";
+import {BondOracle} from "../../../src/oracles/BondOracle.sol";
+import {ReservesOracle} from "../../../src/oracles/ReservesOracle.sol";
+import {BondAutomation} from "../../../src/automation/BondAutomation.sol";
+import {ReservesAutomation} from "../../../src/automation/ReservesAutomation.sol";
+import {BondFunctionsConsumer} from "../../../src/oracles/BondFunctionsConsumer.sol";
+import {ReservesFunctionsConsumer} from "../../../src/oracles/ReservesFunctionsConsumer.sol";
+import {UpdateRiskManagerAutomation} from "../../../src/automation/UpdateRiskManagerAutomation.sol";
+import {DeployProtocol} from "../../../script/DeployProtocol.s.sol";
+import {HelperConfig} from "../../../script/HelperConfig.sol";
+import {MockERC20} from "../../mocks/MockERC20.sol";
+import {MockV3Aggregator} from "../../mocks/MockV3Aggregator.sol";
+import {MockFunctionsRouter} from "../../mocks/MockFunctionsRouter.sol";
+import {BondYieldsResponse, ReservesResponse, SlotRiskParams} from "../../../src/types.sol";
 import {OracleDataExamples} from "./OracleDataExamples.sol";
-
-import {TokenConstants as C} from "../../src/tokens/TokenConstants.sol";
+import {TokenConstants as C} from "../../../src/tokens/TokenConstants.sol";
 
 contract Base is Test {
     HelperConfig internal helperConfig;
-    ITreasuryBondToken internal treasuryBondToken;
-    ITreasury internal treasury;
-    IBondOracle internal bondOracle;
-    IReservesOracle internal reservesOracle;
-    IBondAutomation internal bondAutomation;
-    IReservesAutomation internal reservesAutomation;
-    IBondFunctionsConsumer internal bondFunctionsConsumer;
-    IReservesFunctionsConsumer internal reservesFunctionsConsumer;
-    IUpdateRiskManagerAutomation internal updateRiskManagerAutomation;
+    TreasuryBondToken internal treasuryBondToken;
+    Treasury internal treasury;
+    BondOracle internal bondOracle;
+    ReservesOracle internal reservesOracle;
+    BondAutomation internal bondAutomation;
+    ReservesAutomation internal reservesAutomation;
+    BondFunctionsConsumer internal bondFunctionsConsumer;
+    ReservesFunctionsConsumer internal reservesFunctionsConsumer;
+    UpdateRiskManagerAutomation internal updateRiskManagerAutomation;
 
     // Mocks
     MockERC20 internal mockUsdc;
@@ -76,13 +73,13 @@ contract Base is Test {
     BondYieldsResponse internal yieldsDataBroken = OracleDataExamples.yieldsDataBroken();
     BondYieldsResponse internal yieldsDataStale = OracleDataExamples.yieldsDataStale();
 
-    ReservesResponse internal reservesHealthy = OracleDataExamples.reservesHealthy();
+    ReservesResponse internal reservesHealthy = OracleDataExamples.normalReservesState();
     ReservesResponse internal reservesRiskInsolvency = OracleDataExamples.reservesRiskInsolvency();
     ReservesResponse internal reservesDataBroken = OracleDataExamples.reservesDataBroken();
     ReservesResponse internal reservesDataStale = OracleDataExamples.reservesDataStale();
 
 
-    function setUp() public {
+    function setUp() public virtual {
         DeployProtocol deployProtocol = new DeployProtocol();
 
         (
@@ -118,6 +115,40 @@ contract Base is Test {
         mockUsdc.mint(USER_3, STARTING_USDC_BALANCE_USER_3);
 
         mockUsdcPriceFeed.updateAnswer(INITIAL_USD_USDC_PRICE);
+
+        // Initialize slot risk params for all 4 slots.
+        // reserveBuffer must be >= C.MAX_PERCENTAGE; redeemWindowDuration=0 means always open (V1 stub).
+        SlotRiskParams memory defaultRiskParams = SlotRiskParams({
+            maxDailyRedeem: type(uint128).max,
+            redeemWindowOpen: 0,
+            redeemWindowDuration: 0,
+            reserveBuffer: uint32(C.MAX_PERCENTAGE)
+        });
+        vm.startPrank(deployer);
+        treasuryBondToken.setSlotRiskParams(C.SLOT_2Y,  defaultRiskParams);
+        treasuryBondToken.setSlotRiskParams(C.SLOT_5Y,  defaultRiskParams);
+        treasuryBondToken.setSlotRiskParams(C.SLOT_10Y, defaultRiskParams);
+        treasuryBondToken.setSlotRiskParams(C.SLOT_30Y, defaultRiskParams);
+        vm.stopPrank();
+
+        // Push initial valid oracle data so NAV calculations have a baseline.
+        _updateBondOracleYields(regularYieldsCurve);
+        _updateReservesOracleValues(reservesHealthy);
+
+        // Propagate oracle data into the RiskManager's internal cache.
+        // Deployer holds UPDATE_RISK_MANAGER_VALUES_ROLE (granted in deployToken()).
+        vm.startPrank(deployer);
+        treasuryBondToken.updateYieldsValues();
+        treasuryBondToken.updateReserveValues();
+        vm.stopPrank();
+
+        // Max USDC allowance for all test users — Treasury is the actual transferFrom spender.
+        vm.prank(USER_1);
+        mockUsdc.approve(address(treasury), type(uint256).max);
+        vm.prank(USER_2);
+        mockUsdc.approve(address(treasury), type(uint256).max);
+        vm.prank(USER_3);
+        mockUsdc.approve(address(treasury), type(uint256).max);
     }
 
     /**
@@ -141,7 +172,26 @@ contract Base is Test {
         values[2] = yields.tenYearYield;
         values[3] = yields.thirtyYearYield;
         vm.prank(address(bondFunctionsConsumer));
-        BondOracle(address(bondOracle)).updateYields(values, yields.timestamp, "");
+        bondOracle.updateYields(values, yields.timestamp, "");
+    }
+
+    /**
+     * @dev Updates a single yield slot in BondOracle, keeping all other slots at their current
+     *      oracle-stored values. The resulting BondYieldsResponse passes all RiskManager validations:
+     *      - unchanged slots have zero shock (same value)
+     *      - the target slot uses the caller-supplied value (caller is responsible for staying
+     *        within ±MAX_YIELD_SHOCK_BPS = 5% of the currently stored valid yield)
+     * @param _slot   Slot id: C.SLOT_2Y (1), C.SLOT_5Y (2), C.SLOT_10Y (3), C.SLOT_30Y (4).
+     * @param _newYield New yield value in basis-points×100 (e.g. 45_000 = 4.50%).
+     */
+    function _updateBondOracleSlotYield(uint256 _slot, uint256 _newYield) internal {
+        BondYieldsResponse memory current = bondOracle.getAllYields();
+        current.timestamp = block.timestamp;
+        if (_slot == C.SLOT_2Y)  current.twoYearYield    = _newYield;
+        else if (_slot == C.SLOT_5Y)  current.fiveYearYield   = _newYield;
+        else if (_slot == C.SLOT_10Y) current.tenYearYield    = _newYield;
+        else if (_slot == C.SLOT_30Y) current.thirtyYearYield = _newYield;
+        _updateBondOracleYields(current);
     }
 
     /**
@@ -170,6 +220,8 @@ contract Base is Test {
         bytes memory signature = abi.encodePacked(r, s, v);
 
         vm.prank(address(reservesFunctionsConsumer));
-        ReservesOracle(address(reservesOracle)).updateUsdValues(bond, cash, reserves.timestamp, signature, "");
+        reservesOracle.updateUsdValues(bond, cash, reserves.timestamp, signature, "");
     }
+
+ 
 }

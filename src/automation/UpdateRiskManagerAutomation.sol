@@ -27,13 +27,14 @@ import {ITreasuryBondToken} from "../interfaces/ITreasuryBondToken.sol";
     constructor(
         address _tokenContract, 
         address _reservesOracle, 
-        address _bondYieldsOracle) {
-        if(_tokenContract == address(0) || _reservesOracle == address(0) || _bondYieldsOracle == address(0))
+        address _bondYieldsOracle,
+        address _admin) {
+        if(_tokenContract == address(0) || _reservesOracle == address(0) || _bondYieldsOracle == address(0) || _admin == address(0))
             revert UpdateRiskManager__ZeroAddress();
         i_reservesOracle = _reservesOracle;
         i_bondYieldsOracle = _bondYieldsOracle;
         i_tokenContract = _tokenContract;
-        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(DEFAULT_ADMIN_ROLE, _admin);
         _grantRole(AUTOMATION_ROLE, _tokenContract);
     }
 
@@ -121,6 +122,18 @@ import {ITreasuryBondToken} from "../interfaces/ITreasuryBondToken.sol";
 
     function getUpkeepId() external view returns (uint256) {
         return s_upkeepId;
+    }
+
+    function getTokenContract() external view returns (address) {
+        return i_tokenContract;
+    }
+
+    function getReservesOracle() external view returns (address) {
+        return i_reservesOracle;
+    }
+
+    function getBondOracle() external view returns (address) {
+        return i_bondYieldsOracle;
     }
 
 

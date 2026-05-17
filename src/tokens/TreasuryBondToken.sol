@@ -3,8 +3,9 @@ pragma solidity ^0.8.0;
 
 import {ERC3525} from "./ERC3525.sol";
 import {ERC3643} from "./ERC3643.sol";
-import {IModularCompliance} from "@t-rex/compliance/modular/IModularCompliance.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {IModularCompliance} from "@t-rex/compliance/modular/IModularCompliance.sol";
+import {IIdentityRegistry} from "@t-rex/registry/interface/IIdentityRegistry.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import {YieldsMath} from "../library/YieldsMath.sol";
 import {RiskManager} from "./RiskManager.sol";
@@ -26,7 +27,7 @@ import {ITreasuryBondToken} from "../interfaces/ITreasuryBondToken.sol";
  * Users can open new positions by depositing USDC and minting tokens, or close positions by burning tokens and withdrawing USDC.
  * The contract includes role-based access control for fee management and administrative functions.
  */
-contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager, UsdcUsdConverter, ReentrancyGuard, AccessControl{
+contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager, UsdcUsdConverter, ReentrancyGuard{
     bytes32 public constant OWNER_ROLE = keccak256("OWNER_ROLE"); 
     bytes32 public constant FEES_MANAGER_ROLE = keccak256("FEES_MANAGER_ROLE");
     bytes32 public constant AUTOMATION_TRIGGERER_ROLE = keccak256("AUTOMATION_TRIGGERER_ROLE");
@@ -64,13 +65,14 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
      */
     constructor(
         TreasuryBondTokenConstructorParams memory _params
-    ) ERC3643("TreasuryFi Bond Token", "TBT", _params.decimalsStandard, address(this), _params.identityRegistry, address(0)) 
+    ) ERC3643("TreasuryFi Bond Token", "TBT",_params.admin, _params.decimalsStandard, address(this), _params.identityRegistry, address(0)) 
     ERC3525("TreasuryFi Bond Token", "TBT", _params.decimalsStandard) 
     RiskManager(_params.bondAutomation, _params.reservesAutomation, _params.reservesOracle, _params.bondOracle, _params.treasury)
     UsdcUsdConverter(_params.usdcAddress, _params.usdcPriceFeedAddress, _params.decimalsStandard){
         // Checks for zero addresses
         
         if (
+            _params.admin == address(0) ||
             _params.usdcAddress == address(0) ||
             _params.usdcPriceFeedAddress == address(0) ||
             _params.feesCollector == address(0) ||
@@ -109,11 +111,11 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
             );
         }
 
-        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _grantRole(OWNER_ROLE, msg.sender);
+        //_grantRole(DEFAULT_ADMIN_ROLE, _params.admin);
+        _grantRole(OWNER_ROLE, _params.admin);
         _grantRole(FEES_MANAGER_ROLE, _params.feesCollector);
-        _grantRole(AUTOMATION_TRIGGERER_ROLE, msg.sender);
-        _grantRole(UPDATE_RISK_MANAGER_VALUES_ROLE, msg.sender);
+        _grantRole(AUTOMATION_TRIGGERER_ROLE, _params.admin);
+        _grantRole(UPDATE_RISK_MANAGER_VALUES_ROLE, _params.admin);
 
         i_minimumDepositAmount = 10 * (10 ** i_usdcDecimals); // 10 USDC with decimals
     }
@@ -167,19 +169,20 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         address _mintTo,
         uint256 _slot,
         uint256 _value
-    ) public onlySlotWithRiskParamsSet(_slot) nonReentrant {
+    ) public onlySlotWithRiskParamsSet(_slot) nonReentrant returns(uint256 newTokenId) {
         if (_value < i_minimumDepositAmount) {
             revert TreasuryBondToken__InvalidValue();
         }
         // 1. Calculate entry fees and net amount to invest
         (uint256 netAmount, uint256 feeCollected) = _calculateEntryFees(_value);
         // 2. TransferFrom caller di usdc _value to treasury contract
-        i_treasury.depositUsdcFromOpenNewPosition(_value, msg.sender, _slot, feeCollected);
+        // Pass netAmount so Treasury transfers netAmount + feeCollected = _value total from the user.
+        i_treasury.depositUsdcFromOpenNewPosition(netAmount, msg.sender, _slot, feeCollected);
         // 3.  convert net amount from usdc to usd with std decimals (18)
         uint256 netAmountInUsd = _convertUsdcToUsd18(netAmount);
 
         // 4. call _mint to: checks ERC3643, checks RiskManager, checks ERc3525 accounting, 
-        uint256 newTokenId = _mint(_mintTo, _slot, netAmountInUsd);
+        newTokenId = _mint(_mintTo, _slot, netAmountInUsd);
         
         // 5. emit event newPositionOpened
         emit PositionOpened(_mintTo, newTokenId, _slot, _value, netAmountInUsd, C.PAR);
@@ -700,13 +703,16 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
 ///////////////////////// public getters /////////////////////////// 
 ////////////////////////////////////////////////////////////////////  
 
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function ownerOf(uint256 tokenId) public view override returns (address) {
         return super.ownerOf(tokenId);
     }
 
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function balanceOf(uint256 tokenId) public view override(ERC3643, ERC3525) returns (uint256) {
         return super.balanceOf(tokenId);
     }
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function balanceOf(address owner) public view override(ERC3643, ERC3525) returns (uint256) {
         return super.balanceOf(owner);
     }
@@ -731,6 +737,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         _assertSolvency();
     }
 
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function getNextRedemptionWindow(uint256 _slot) external view returns (uint256 nextWindowOpen, uint256 windowDuration) {
         (nextWindowOpen, windowDuration) = _getNextRedemptionWindow(_slot);
     }
@@ -746,6 +753,66 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
     ) external view returns (PositionData memory) {
         _requireMinted(_tokenId);
         return s_fromIdToPositionData[_tokenId];
+    }
+
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
+    function getMinimumDepositAmount() external view returns (uint256) {
+        return i_minimumDepositAmount;
+    }
+
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
+    function getBondAutomation() external view returns (address) {
+        return address(i_yieldsAutomation);
+    }
+
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
+    function getReservesAutomation() external view returns (address) {
+        return address(i_reservesAutomation);
+    }
+
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
+    function getBondOracle() external view returns (address) {
+        return address(i_yieldsOracle);
+    }
+
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
+    function getReservesOracle() external view returns (address) {
+        return address(i_reservesOracle);
+    }
+
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
+    function getTreasury() external view returns (address) {
+        return address(i_treasury);
+    }
+
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
+    function getInterval() external view returns (uint256) {
+        return i_interval;
+    }
+
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
+    function getGracePeriod() external view returns (uint256) {
+        return i_gracePeriod;
+    }
+
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
+    function getUsdc() external view returns (address) {
+        return _getUsdc();
+    }
+
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
+    function getUsdcPriceFeed() external view returns (address) {
+        return _getUsdUsdcPriceFeed();
+    }
+
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
+    function getUsdcDecimals() external view returns (uint8) {
+        return i_usdcDecimals;
+    }
+
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
+    function getUsdcPriceFeedDecimals() external view returns (uint8) {
+        return i_usdcPriceFeedDecimals;
     }
 
     /**
@@ -765,17 +832,17 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
 
     // /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function name() public view override(ERC3643, ERC3525) returns (string memory) {
-        return super.name();
+        return s_name;
     }
 
     // /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function symbol() public view override(ERC3643, ERC3525) returns (string memory) {
-        return super.symbol();
+        return s_symbol;
     }
 
     // /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function valueDecimals() public view override(ERC3643, ERC3525) returns (uint8) {
-        return super.valueDecimals();
+        return i_decimals;
     }
 
 ////////////////////////////////////////////////////////////////////
@@ -893,8 +960,13 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
 /////////////////// ERC3643 Getters inheritance //////////////////// 
 ////////////////////////////////////////////////////////////////////  
     /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
-    function compliance() external view  returns (IModularCompliance) {
+    function compliance() external view returns (IModularCompliance) {
         return s_tokenCompliance;
+    }
+
+    /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.
+    function identityRegistry() external view returns (IIdentityRegistry) {
+        return s_tokenIdentityRegistry;
     }
 
     /// @dev Inherit from IERC3643 on ITreasuryBondToken. See interface for details.

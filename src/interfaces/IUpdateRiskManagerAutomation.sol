@@ -26,4 +26,7 @@ interface IUpdateRiskManagerAutomation is AutomationCompatibleInterface, IAccess
     // Getters
     function getChainlinkForwarder() external view returns (address);
     function getUpkeepId() external view returns (uint256);
+    function getTokenContract() external view returns (address);
+    function getReservesOracle() external view returns (address);
+    function getBondOracle() external view returns (address);
 }

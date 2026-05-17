@@ -8,35 +8,31 @@ REGISTER_INVESTOR     := script/RegisterInvetsor.s.sol
         test-single storage coverage coverage-report deploy-identity register-investor
 
 build:
-	forge build
+	FOUNDRY_PROFILE=solx forge build
 
-# Usage: make build-script NAME=DeployProtocol
-build-script:
-	forge build --contracts script/$(NAME).s.sol
-
-test:
+test: 
 	forge test -vv
 
 # ─── Unit tests ──────────────────────────────────────────────────────────────
 
 unittest:
-	forge test --match-path '$(UNIT_TEST_PATH)' -vv
+	FOUNDRY_PROFILE=solx forge test --match-path '$(UNIT_TEST_PATH)' -vv
 
 test-bond-automation:
-	forge test --match-path 'test/unitTest/AutomationUnitTest/BondAutomationTest.t.sol' -vv
+	FOUNDRY_PROFILE=solx forge test --match-path 'test/unitTest/AutomationUnitTest/BondAutomationTest.t.sol' -vv
 
 test-reserves-automation:
-	forge test --match-path 'test/unitTest/AutomationUnitTest/ReservesAutomationTest.t.sol' -vv
+	FOUNDRY_PROFILE=solx forge test --match-path 'test/unitTest/AutomationUnitTest/ReservesAutomationTest.t.sol' -vv
 
 # Usage: make test-single NAME=testFunctionName
 test-single:
-	forge test --match-test $(NAME) -vvvv
+	FOUNDRY_PROFILE=solx forge test --match-test $(NAME) -vvvv
 
 # ─── Inspect ─────────────────────────────────────────────────────────────────
 
 # Usage: make storage NAME=Treasury
 storage:
-	forge inspect $(NAME) storage-layout
+	FOUNDRY_PROFILE=solx forge inspect $(NAME) storage-layout
 
 # ─── Coverage ────────────────────────────────────────────────────────────────
 

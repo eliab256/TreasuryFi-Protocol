@@ -5,6 +5,7 @@ pragma solidity ^0.8.0;
 import {IIdentityRegistry} from "@t-rex/registry/interface/IIdentityRegistry.sol";
 import {IModularCompliance} from "@t-rex/compliance/modular/IModularCompliance.sol";
 import {IIdentity} from "@onchain-id/solidity/contracts/interface/IIdentity.sol";
+import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {IERC3643} from "../interfaces/IERC3643.sol";
 
 /**
@@ -14,9 +15,8 @@ import {IERC3643} from "../interfaces/IERC3643.sol";
     *         compliance contract binding, pausing, freezing and recovery mechanisms. It is designed to be inherited 
     *         by the specific token implementations.
  */
-abstract contract ERC3643 is IERC3643 {
+abstract contract ERC3643 is IERC3643, AccessControl {
 
-     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
      bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
      bytes32 public constant FREEZER_ROLE = keccak256("FREEZER_ROLE");
      bytes32 public constant RECOVERY_ROLE = keccak256("RECOVERY_ROLE");
@@ -44,6 +44,7 @@ abstract contract ERC3643 is IERC3643 {
     constructor(
         string memory _name,
         string memory _symbol,
+        address _admin,
         uint8 _decimals,
         address _onchainID,
         address _identityRegistry,
@@ -57,8 +58,13 @@ abstract contract ERC3643 is IERC3643 {
         if( _identityRegistry == address(0)){
             revert ERC3643__ZeroAddress();
         }
-        s_tokenOnchainID = _onchainID;
 
+        _grantRole(DEFAULT_ADMIN_ROLE, _admin);
+        _grantRole(PAUSER_ROLE, _admin);
+        _grantRole(FREEZER_ROLE, _admin);
+        _grantRole(RECOVERY_ROLE, _admin);
+
+        _setOnchainID(_onchainID);
         _setIdentityRegistry(_identityRegistry);
         _setCompliance(_compliance);
     }
@@ -88,6 +94,20 @@ abstract contract ERC3643 is IERC3643 {
         if (_onchainID == address(0)) revert ERC3643__ZeroAddress();
         s_tokenOnchainID = _onchainID;
         emit UpdatedTokenInformation(name(), symbol(), valueDecimals(), TOKEN_VERSION, _onchainID);
+    }
+
+    /**
+     * @dev Internal implementation. Public accessor with access control is exposed in TreasuryBondToken as `setCompliance`.
+     */
+    function _setCompliance(address _compliance) internal {
+        if (address(s_tokenCompliance) != address(0)) {
+            s_tokenCompliance.unbindToken(address(this));
+        }
+        s_tokenCompliance = IModularCompliance(_compliance);
+        if (_compliance != address(0)) {
+            s_tokenCompliance.bindToken(address(this));
+            emit ComplianceAdded(_compliance);
+        }
     }
 
     function _recoveryAddress(
@@ -231,18 +251,6 @@ abstract contract ERC3643 is IERC3643 {
         if (!s_tokenPaused) {
             revert ERC3643__TokenNotPaused();
         }
-    }
-
-    /**
-     * @dev Internal implementation. Public accessor with access control is exposed in TreasuryBondToken as `setCompliance`.
-     */
-    function _setCompliance(address _compliance) internal {
-        if (address(s_tokenCompliance) != address(0)) {
-            s_tokenCompliance.unbindToken(address(this));
-        }
-        s_tokenCompliance = IModularCompliance(_compliance);
-        s_tokenCompliance.bindToken(address(this));
-        emit ComplianceAdded(_compliance);
     }
 
     function _beforeValueTransfer(

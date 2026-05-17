@@ -38,6 +38,10 @@ contract ReservesAutomation is IReservesAutomation, BaseAutomation {
         IReservesFunctionsConsumer(s_functionsConsumer).sendRequest();
     }
 
+    function supportsInterface(bytes4 interfaceId) public view override returns (bool) {
+        return interfaceId == type(IReservesAutomation).interfaceId || super.supportsInterface(interfaceId);
+    }
+
     // --- Getters ---
 
     /// @dev Inherited from IReservesAutomation. See interface for details.

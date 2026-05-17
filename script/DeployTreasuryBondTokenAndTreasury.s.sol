@@ -76,6 +76,7 @@ contract DeployTreasuryBondTokenAndTreasury is Script {
 
         TreasuryBondTokenConstructorParams memory params = TreasuryBondTokenConstructorParams({
             decimalsStandard: config.decimals,
+            admin: config.deployer,
             usdcAddress: config.usdcAddress,
             usdcPriceFeedAddress: config.usdcPriceFeedAddress,
             identityRegistry: _identityRegistry,

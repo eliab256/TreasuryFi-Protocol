@@ -15,8 +15,9 @@ contract BondOracle is IBondOracle, ERC165, AccessControl {
     address internal s_functionsConsumer;
     bool private s_consumerSet;
 
-    constructor() {
-        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+    constructor(address _admin) {
+        if (_admin == address(0)) revert BondOracle__ZeroAddress();
+        _grantRole(DEFAULT_ADMIN_ROLE, _admin);
     }
 
     function setFunctionsConsumer(address _consumer) external onlyRole(DEFAULT_ADMIN_ROLE) {

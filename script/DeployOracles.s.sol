@@ -26,8 +26,6 @@ contract DeployOracles is Script {
         HelperConfig helperConfig = new HelperConfig();
         HelperConfig.NetworkConfig memory config = helperConfig.getActiveNetworkConfig();
 
-        vm.startBroadcast(config.deployer);
-
         console.log('======================= Oracles Deployment =================');
 
         (BondOracle bondOracle,
@@ -40,8 +38,6 @@ contract DeployOracles is Script {
         uint256 reservesUpkeepId,
         address bondForwarder,
         address reservesForwarder) = deployOracles(helperConfig);
-
-        vm.stopBroadcast();
 
         return (
             bondOracle,
@@ -65,35 +61,47 @@ contract DeployOracles is Script {
             console.log('======================= Oracles Deployment =================');
         console.log('======================= Oracles Stacks Contracts Deployment =================');
         // deploy BondOracle and reservesOracle
-        BondOracle bondOracle = new BondOracle();
-        ReservesOracle reservesOracle = new ReservesOracle(config.signer);
+        vm.broadcast(config.deployer);
+        BondOracle bondOracle = new BondOracle(config.deployer);
+        vm.broadcast(config.deployer);
+        ReservesOracle reservesOracle = new ReservesOracle(config.signer, config.deployer);
 
         console.log("BondOracle deployed at:", address(bondOracle));
         console.log("ReservesOracle deployed at:", address(reservesOracle));
 
         // deploy functions consumers
-        BondFunctionsConsumer bondFunctionsConsumer = new BondFunctionsConsumer(config.functionsRouter, config.donId, config.gasLimit, address(bondOracle));
-        ReservesFunctionsConsumer reservesFunctionsConsumer = new ReservesFunctionsConsumer(config.functionsRouter, config.donId, config.gasLimit, address(reservesOracle));
+        vm.broadcast(config.deployer);
+        BondFunctionsConsumer bondFunctionsConsumer = new BondFunctionsConsumer(config.functionsRouter, config.donId, config.gasLimit, address(bondOracle), config.deployer);
+        vm.broadcast(config.deployer);
+        ReservesFunctionsConsumer reservesFunctionsConsumer = new ReservesFunctionsConsumer(config.functionsRouter, config.donId, config.gasLimit, address(reservesOracle), config.deployer);
 
         console.log("BondFunctionsConsumer deployed at:", address(bondFunctionsConsumer));
         console.log("ReservesFunctionsConsumer deployed at:", address(reservesFunctionsConsumer));
 
         // set function consumers in oracles
+        // vm.broadcast sets msg.sender == config.deployer in forge tests (like prank)
+        // and records each call as a separate transaction in forge script (for production).
+        vm.broadcast(config.deployer);
         bondOracle.setFunctionsConsumer(address(bondFunctionsConsumer));
+        vm.broadcast(config.deployer);
         reservesOracle.setFunctionsConsumer(address(reservesFunctionsConsumer));
 
         console.log("Set FunctionsConsumer in BondOracle asdress:", address(bondFunctionsConsumer));
         console.log("Set FunctionsConsumer in ReservesOracle asdress:", address(reservesFunctionsConsumer));
 
-        // deploy automation
-        BondAutomation bondAutomation = new BondAutomation(address(bondFunctionsConsumer), msg.sender);
-        ReservesAutomation reservesAutomation = new ReservesAutomation(address(reservesFunctionsConsumer), msg.sender);
+        // deploy automation — config.deployer is DEFAULT_ADMIN_ROLE holder
+        vm.broadcast(config.deployer);
+        BondAutomation bondAutomation = new BondAutomation(address(bondFunctionsConsumer), config.deployer);
+        vm.broadcast(config.deployer);
+        ReservesAutomation reservesAutomation = new ReservesAutomation(address(reservesFunctionsConsumer), config.deployer);
 
         console.log("BondAutomation deployed at:", address(bondAutomation));
         console.log("ReservesAutomation deployed at:", address(reservesAutomation));
 
         // grant automation contracts permission to call functions consumers
+        vm.broadcast(config.deployer);
         bondFunctionsConsumer.setAutomationContract(address(bondAutomation));
+        vm.broadcast(config.deployer);
         reservesFunctionsConsumer.setAutomationContract(address(reservesAutomation));
 
         console.log('==============================================================');
@@ -103,14 +111,19 @@ contract DeployOracles is Script {
 
         // if not Anvil, register automations contracts in the chainlink automation registry
         if(isNotAnvil){
-            uint256 bondUpkeepId = registerAutomation( address(bondAutomation),"Bond Automation", config);
-            uint256 reservesUpkeepId = registerAutomation(address(reservesAutomation), "Reserves Automation", config);
-            
+            bondUpkeepId = registerAutomation( address(bondAutomation),"Bond Automation", config);
+            reservesUpkeepId = registerAutomation(address(reservesAutomation), "Reserves Automation", config);
         }
 
-        // setUpkeepID on automation contracts
-        bondAutomation.setUpkeepId(bondUpkeepId);
-        reservesAutomation.setUpkeepId(reservesUpkeepId);
+        // setUpkeepID on automation contracts (skip on Anvil where upkeepId is 0)
+        if (bondUpkeepId != 0) {
+            vm.broadcast(config.deployer);
+            bondAutomation.setUpkeepId(bondUpkeepId);
+        }
+        if (reservesUpkeepId != 0) {
+            vm.broadcast(config.deployer);
+            reservesAutomation.setUpkeepId(reservesUpkeepId);
+        }
         
         console.log("ReservesAutomation registered with upkeep ID:", reservesUpkeepId);
         console.log("Upkeep ID:", reservesAutomation.getUpkeepId());
@@ -121,7 +134,9 @@ contract DeployOracles is Script {
         address bondForwarder = helperConfig.getForwarderFromUpkeepId(bondUpkeepId);
         address reservesForwarder = helperConfig.getForwarderFromUpkeepId(reservesUpkeepId);
         
+        vm.broadcast(config.deployer);
         bondAutomation.setChainlinkForwarder(bondForwarder);
+        vm.broadcast(config.deployer);
         reservesAutomation.setChainlinkForwarder(reservesForwarder);
 
         if(reservesForwarder == address(0) || bondForwarder == address(0)) {
@@ -174,6 +189,7 @@ contract DeployOracles is Script {
         console.log('Funding Amount:', _config.fundingAmountForEachUpkeep / 1e18, 'LINK');
 
         // 1. Deploy AutomationRegistration helper
+        vm.broadcast(_config.deployer);
         AutomationRegistration registration = new AutomationRegistration(
             _config.linkToken,
             _config.automationRegistrar
@@ -191,12 +207,14 @@ contract DeployOracles is Script {
         }
 
         // 3. Transfer LINK to the registration contract
+        vm.broadcast(_config.deployer);
         link.approve(address(registration), _config.fundingAmountForEachUpkeep);
         console.log('Transferred', _config.fundingAmountForEachUpkeep / 1e18, 'LINK to registration contract');
         console.log('==========================================================================');
         console.log('');
 
         // 4. Register the upkeep
+        vm.broadcast(_config.deployer);
         upkeepId = registration.registerAndFundUpkeep(
             _upkeepContract,
             _name,
