@@ -163,4 +163,8 @@ contract BondFunctionsConsumer is
     function getBondOracle() external view returns (address) {
         return i_bondOracle;
     }
+
+    function getRouter() external view returns (address) {
+        return address(i_functionsRouter);
+    }
 }

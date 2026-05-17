@@ -19,7 +19,7 @@ import {IdentityRegistry} from "@t-rex/registry/implementation/IdentityRegistry.
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {TokenConstants as C} from "../../../src/tokens/TokenConstants.sol";
 
-contract TestDeployProtocol is Test {
+contract LocalDeployProtocolTest is Test {
     DeployProtocol deployProtocolScript;
     HelperConfig helperConfig;
     IdentityRegistry identityRegistry;
@@ -137,4 +137,41 @@ contract TestDeployProtocol is Test {
         //assertEq(updateRiskManagerAutomation.getChainlinkForwarder(), forwarder);
     }
 
+    function test_BondFunctionsConsumerConstructorSettings() public {
+        assertEq(bondFunctionsConsumer.hasRole(bondFunctionsConsumer.DEFAULT_ADMIN_ROLE(), deployer), true);
+        assertEq(bondFunctionsConsumer.getBondOracle(), address(bondOracle));
+        assertEq(bondFunctionsConsumer.getDonID(), helperConfig.getActiveNetworkConfig().donId);
+        assertEq(bondFunctionsConsumer.getGasLimit(), helperConfig.getActiveNetworkConfig().gasLimit);
+        assertEq(bondFunctionsConsumer.getRouter(), helperConfig.getActiveNetworkConfig().functionsRouter);
+        assertEq(bondFunctionsConsumer.hasRole(bondFunctionsConsumer.AUTOMATION_ROLE(), address(bondAutomation)), true);
+    }
+
+
+    function test_ReservesFunctionsConsumerConstructorSettings() public {
+        assertEq(reservesFunctionsConsumer.hasRole(reservesFunctionsConsumer.DEFAULT_ADMIN_ROLE(), deployer), true);
+        assertEq(reservesFunctionsConsumer.getOracle(), address(reservesOracle));
+        assertEq(reservesFunctionsConsumer.getDonID(), helperConfig.getActiveNetworkConfig().donId);
+        assertEq(reservesFunctionsConsumer.getGasLimit(), helperConfig.getActiveNetworkConfig().gasLimit);
+        assertEq(reservesFunctionsConsumer.getRouter(), helperConfig.getActiveNetworkConfig().functionsRouter);
+        assertEq(reservesFunctionsConsumer.hasRole(reservesFunctionsConsumer.AUTOMATION_ROLE(), address(reservesAutomation)), true);
+    }
+
+    function test_BondOracleConstructorSettings() public {
+        assertEq(bondOracle.hasRole(bondOracle.DEFAULT_ADMIN_ROLE(), deployer), true);
+        assertEq(bondOracle.hasRole(bondOracle.UPDATER_ROLE(), address(bondFunctionsConsumer)), true);
+    }
+
+    function test_ReservesOracleConstructorSettings() public {
+        assertEq(reservesOracle.hasRole(reservesOracle.DEFAULT_ADMIN_ROLE(), deployer), true);
+        assertEq(reservesOracle.hasRole(reservesOracle.UPDATER_ROLE(), address(reservesFunctionsConsumer)), true);
+        assertEq(reservesOracle.getSigner(), helperConfig.getActiveNetworkConfig().signer);
+    }
+
+    function test_TreasuryConstructorSettings() public {
+        assertEq(treasury.hasRole(treasury.DEFAULT_ADMIN_ROLE(), deployer), true);
+        assertEq(treasury.hasRole(treasury.FEES_COLLECTOR_ROLE(), helperConfig.getActiveNetworkConfig().feesCollector), true);
+        assertEq(treasury.hasRole(treasury.LIQUIDITY_DEPOSITOR_ROLE(), deployer), true);
+        assertEq(treasury.getUsdcAddress(), helperConfig.getActiveNetworkConfig().usdcAddress);
+        assertEq(treasury.hasRole(treasury.TOKEN_CONTRACT_ROLE(),  address(treasuryBondToken)), true);
+    }
 }

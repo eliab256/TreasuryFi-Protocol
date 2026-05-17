@@ -118,4 +118,10 @@ interface ITreasury {
      */
     function getTotalUsdcLiquidityPerSlot(uint256 _slot) external view returns (uint256);
 
+    /**
+     * @notice Returns the address of the USDC token contract.
+     * @return The address of the USDC token.
+     */
+    function getUsdcAddress() external view returns (address);
+
 }

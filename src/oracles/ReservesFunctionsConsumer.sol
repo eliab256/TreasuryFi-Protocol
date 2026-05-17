@@ -169,4 +169,9 @@ contract ReservesFunctionsConsumer is IReservesFunctionsConsumer, FunctionsClien
     function getOracle() external view returns (address) {
         return i_oracle;
     }
+
+    /// @dev Inherited from IReservesFunctionsConsumer. See interface for details.
+    function getRouter() external view returns (address) {
+        return address(i_functionsRouter);
+    }
 }

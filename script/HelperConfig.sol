@@ -41,7 +41,6 @@ contract HelperConfig is CodeConstants, Script {
     address public anvilFeeCollector;
     address public anvilRegistryMock;
     address public anvilRegistrarMock;
-   
 
     /**
      * @notice Initializes HelperConfig and sets active network configuration based on current chain

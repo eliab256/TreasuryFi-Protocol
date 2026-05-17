@@ -41,9 +41,9 @@ contract Treasury is AccessControl, ITreasury {
         _;
     }
 
-    constructor( address _usdc, address _feeCollector, address _liquidityDepositor) {
+    constructor(address _admin, address _usdc, address _feeCollector, address _liquidityDepositor) {
         i_usdc = IERC20(_usdc);
-        _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _setupRole(DEFAULT_ADMIN_ROLE, _admin);
         _setupRole(FEES_COLLECTOR_ROLE, _feeCollector);
         _setupRole(LIQUIDITY_DEPOSITOR_ROLE, _liquidityDepositor);
     }
@@ -224,6 +224,12 @@ contract Treasury is AccessControl, ITreasury {
     function getTotalUsdcLiquidityPerSlot(uint256 _slot) external view returns (uint256){
         return s_totalUsdcPerSlot[_slot];
     }
+
+    /// @dev Inherited from ITreasury. See interface for details.
+    function getUsdcAddress() external view returns (address) {
+        return address(i_usdc);
+    }
+
 
 
 }

@@ -82,7 +82,7 @@ contract DeployProtocol is Script {
 
         // 4. Set token contract address on treasury
         deployTreasuryAndTokenScript.setTokenContractOnTreasury(
-            address(treasury), address(treasuryBondToken));
+            address(treasury), address(treasuryBondToken), config.deployer);
 
         // 5. Deploy UpdateRiskManagerAutomation
         (updateRiskManagerAutomation, , ) = 

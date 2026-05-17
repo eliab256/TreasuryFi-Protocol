@@ -16,23 +16,23 @@ test:
 # ─── Unit tests ──────────────────────────────────────────────────────────────
 
 unittest:
-	FOUNDRY_PROFILE=solx forge test --match-path '$(UNIT_TEST_PATH)' -vv
+	forge test --match-path '$(UNIT_TEST_PATH)' -vv
 
 test-bond-automation:
-	FOUNDRY_PROFILE=solx forge test --match-path 'test/unitTest/AutomationUnitTest/BondAutomationTest.t.sol' -vv
+	forge test --match-path 'test/unitTest/AutomationUnitTest/BondAutomationTest.t.sol' -vv
 
 test-reserves-automation:
-	FOUNDRY_PROFILE=solx forge test --match-path 'test/unitTest/AutomationUnitTest/ReservesAutomationTest.t.sol' -vv
+	forge test --match-path 'test/unitTest/AutomationUnitTest/ReservesAutomationTest.t.sol' -vv
 
 # Usage: make test-single NAME=testFunctionName
 test-single:
-	FOUNDRY_PROFILE=solx forge test --match-test $(NAME) -vvvv
+	forge test --match-test $(NAME) -vvvv
 
 # ─── Inspect ─────────────────────────────────────────────────────────────────
 
 # Usage: make storage NAME=Treasury
 storage:
-	FOUNDRY_PROFILE=solx forge inspect $(NAME) storage-layout
+	forge inspect $(NAME) storage-layout
 
 # ─── Coverage ────────────────────────────────────────────────────────────────
 

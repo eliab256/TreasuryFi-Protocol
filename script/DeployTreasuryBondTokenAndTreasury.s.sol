@@ -27,10 +27,10 @@ contract DeployTreasuryBondTokenAndTreasury is Script {
         TreasuryBondToken treasuryBondToken = deployToken(helperConfig, _identityRegistry, _bondAutomation, _reservesAutomation, 
           _reservesOracle, _bondOracle, address(treasury));
 
-        // After deploying token contract, set token contract address on treasury
-        setTokenContractOnTreasury(address(treasury), address(treasuryBondToken));
-
         vm.stopBroadcast();
+
+        // After deploying token contract, set token contract address on treasury
+        setTokenContractOnTreasury(address(treasury), address(treasuryBondToken), config.deployer);
 
         return (treasuryBondToken, treasury);
     }
@@ -39,7 +39,7 @@ contract DeployTreasuryBondTokenAndTreasury is Script {
     
         console.log('======================= Treasury Deployment =================');
 
-        Treasury treasury = new Treasury(config.usdcAddress, config.feesCollector, config.deployer);
+        Treasury treasury = new Treasury(config.deployer, config.usdcAddress, config.feesCollector, config.deployer);
 
         console.log('Treasury deployed at:', address(treasury));
         console.log('==============================================================');
@@ -54,9 +54,10 @@ contract DeployTreasuryBondTokenAndTreasury is Script {
      * @param _treasury The address of the treasury contract.
      * @param _tokenContract The address of the token contract to be set.
      */
-    function setTokenContractOnTreasury(address _treasury, address _tokenContract) public {
+    function setTokenContractOnTreasury(address _treasury, address _tokenContract, address _deployer) public {
         console.log('======================= Setting Token Contract on Treasury =================');
         Treasury treasury = Treasury(_treasury);
+        vm.prank(_deployer);
         treasury.setTokenContract(_tokenContract);
         console.log('Token contract set on Treasury: ', _tokenContract);
         console.log('==============================================================');
