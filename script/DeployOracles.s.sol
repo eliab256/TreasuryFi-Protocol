@@ -24,7 +24,6 @@ contract DeployOracles is Script {
         ReservesFunctionsConsumer, BondAutomation, ReservesAutomation, uint256, uint256, address, address) { 
 
         HelperConfig helperConfig = new HelperConfig();
-        HelperConfig.NetworkConfig memory config = helperConfig.getActiveNetworkConfig();
 
         console.log('======================= Oracles Deployment =================');
 

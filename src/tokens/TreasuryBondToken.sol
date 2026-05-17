@@ -20,6 +20,8 @@ import {IReservesAutomation} from "../interfaces/IReservesAutomation.sol";
 import {ITreasury} from "../interfaces/ITreasury.sol";
 import {ITreasuryBondToken} from "../interfaces/ITreasuryBondToken.sol";
 
+import {console2} from "forge-std/console2.sol";
+
 /**
  * @title TreasuryBondToken
  * @notice ERC-3525 token representing fractionalized positions in US Treasury bond buckets.
@@ -210,6 +212,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         address owner = ownerOf(_tokenId);
         uint256 slot = slotOf(_tokenId);
         (uint256 usdcPayout, uint256 netYieldToClaimInUsdc, uint256 managmentFeeInUsdc , uint256 earlyRedeemFeeUsdc, uint256 currentNAV) = _closePositionValue(_tokenId, slot, _valueToBurn);
+        console2.log("earlyRedeemFeeUsdc: ", earlyRedeemFeeUsdc);
         uint256 totalUsdcOutFromSlotLiquidity = usdcPayout + netYieldToClaimInUsdc + earlyRedeemFeeUsdc + managmentFeeInUsdc;
         _riskManagerBeforeTransferLiquidity(slot, totalUsdcOutFromSlotLiquidity);
         _burnValue(_tokenId, _valueToBurn);
@@ -486,15 +489,13 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
      * @notice Hook that is called before minting new tokens.
      * @dev This function is called when mint or transferFrom new tokens (partial transfer). 
      * @dev Used on _beforeValueTransfer to implement the logic that needs to run before minting new tokens
-     * @param _to The address which will receive the newly minted tokens.
-     * @param _fromTokenId The token ID from which value is being transferred (zero if minting).
      * @param _toTokenId The token ID to which value is being transferred (zero if burning).
      * @param _slot The slot of the token being minted.
      * @param _value The amount of value being minted.
      */
     function _beforeMint(
-        address _to,
-        uint256 _fromTokenId,
+        address /*_to*/,
+        uint256 /*_fromTokenId*/,
         uint256 _toTokenId,
         uint256 _slot,
         uint256 _value
@@ -756,6 +757,36 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
     }
 
     /// @dev Inherit from ITreasuryBondToken. See interface for details.
+    function getClaimableYieldInUsdc(uint256 _tokenId) external view returns (uint256 claimableYieldUsdc) {
+        _requireMinted(_tokenId);
+        
+        // 1. Retrieve position data
+        PositionData memory posData = s_fromIdToPositionData[_tokenId];
+        
+        // 2. Get balance and slot
+        uint256 value = balanceOf(_tokenId);
+        uint256 slot = _slotOf(_tokenId);
+        
+        // 3. Calculate principal in USD (18 decimals)
+        uint256 principalUsd = YieldsMath.calculatePrincipalUsd(value, posData.entryNAV, C.PAR);
+        
+        // 4. Calculate elapsed time since last claim
+        uint256 elapsedTime = block.timestamp - posData.lastClaimTimestamp;
+        
+        // 5. Calculate gross accrued yield in USD (18 decimals)
+        uint256 grossAccrued = principalUsd * posData.entryYield * elapsedTime / (365 days * C.PERCENTAGE_PRECISION);
+        
+        // 6. Calculate management fee
+        uint256 managmentFee = grossAccrued * C.PERCENTAGE_YIELD_FEE / C.MAX_PERCENTAGE;
+        
+        // 7. Calculate net payout in USD
+        uint256 netPayout = grossAccrued - managmentFee;
+        
+        // 8. Convert from USD (18 decimals) to USDC (6 decimals)
+        claimableYieldUsdc = _convertUsd18ToUsdc(netPayout);
+    }
+
+    /// @dev Inherit from ITreasuryBondToken. See interface for details.
     function getMinimumDepositAmount() external view returns (uint256) {
         return i_minimumDepositAmount;
     }
@@ -828,6 +859,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         if (_slot == C.SLOT_5Y)  return C.D_MOD_5Y;
         if (_slot == C.SLOT_10Y) return C.D_MOD_10Y;
         if (_slot == C.SLOT_30Y) return C.D_MOD_30Y;
+        revert TreasuryBondToken__InvalidSlot();
     }
 
     // /// @dev Inherit from ITreasuryBondToken. See interface for details.

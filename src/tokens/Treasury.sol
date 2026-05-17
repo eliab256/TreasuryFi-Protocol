@@ -60,7 +60,7 @@ contract Treasury is AccessControl, ITreasury {
         ) external onlyRole(TOKEN_CONTRACT_ROLE) onlyValidSlot(_slot){
         // 1. update accounting 
         uint256 totalAmount = _amount + _feeAmount;
-        s_totalUsdcPerSlot[_slot] += totalAmount;
+        s_totalUsdcPerSlot[_slot] += _amount;
         _updateFeeAccounting(_feeAmount, 0, 0, _slot);
         // 2. transfer USDC from the user to the treasury
         i_usdc.safeTransferFrom(_from, address(this), totalAmount);

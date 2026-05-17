@@ -60,7 +60,7 @@ contract Base is Test {
     uint256 public constant STARTING_ETH_BALANCE_USER_2 = 10 ether;
     uint256 public constant STARTING_ETH_BALANCE_USER_3 = 10 ether;
 
-    uint256 public constant STARTING_USDC_DEPLOYER_BALANCE = 100000 * 10 ** 6;
+    uint256 public constant STARTING_USDC_DEPLOYER_BALANCE = 10000000 * 10 ** 6;
     uint256 public constant STARTING_USDC_BALANCE_USER_1 = 10000 * 10 ** 6;
     uint256 public constant STARTING_USDC_BALANCE_USER_2 = 10000 * 10 ** 6;
     uint256 public constant STARTING_USDC_BALANCE_USER_3 = 10000 * 10 ** 6;
@@ -152,12 +152,29 @@ contract Base is Test {
     }
 
     /**
-     * @dev Refreshes all mock price feeds to block.timestamp.
-     *      Required after vm.warp() because Index.getLatestPrice reverts with
-     *      Index__PriceIsStale when updatedAt > MAX_DELAY (1 hour) in the past.
+     * @dev Refreshes all data feeds (price feed, BondOracle, ReservesOracle) and RiskManager cache to block.timestamp.
+     *      Required after vm.warp() to prevent staleness reverts:
+     *      - UsdcUsdConverter: reverts if (block.timestamp - updatedAt) > MAX_USDC_DELAY (25 hours)
+     *      - BondOracle/ReservesOracle: revert if (block.timestamp - lastTimestamp) > STALENESS_THRESHOLD (48 hours)
+     *      Re-pushes the last known valid yields/reserves (from setUp) with updated block.timestamp and syncs RiskManager.
      */
-    function _refreshPriceFeeds() internal {
+    function _refreshAllDataFeeds() internal {
         mockUsdcPriceFeed.updateAnswer(INITIAL_USD_USDC_PRICE);
+        
+        // Re-push last known valid yields and reserves with updated timestamp
+        BondYieldsResponse memory yields = regularYieldsCurve;
+        yields.timestamp = block.timestamp;
+        _updateBondOracleYields(yields);
+        
+        ReservesResponse memory reserves = reservesHealthy;
+        reserves.timestamp = block.timestamp;
+        _updateReservesOracleValues(reserves);
+        
+        // Sync RiskManager cache with refreshed oracle data
+        vm.prank(deployer);
+        treasuryBondToken.updateYieldsValues();
+        vm.prank(deployer);
+        treasuryBondToken.updateReserveValues();
     }
 
     /**
@@ -221,6 +238,48 @@ contract Base is Test {
 
         vm.prank(address(reservesFunctionsConsumer));
         reservesOracle.updateUsdValues(bond, cash, reserves.timestamp, signature, "");
+    }
+
+    /**
+     * @dev Helper to push broken yields data into oracle and trigger RiskManager validation.
+     *      The corrupted 30Y yield value (×100 error) will cause the 30Y slot to be frozen.
+     *      Useful for testing protocol behavior when oracle data is corrupted.
+     *      Warps time forward by 1 second to ensure the new data is newer than the previous valid data.
+     */
+    function _updateYieldsDataBroken() internal {
+        // Warp forward 1 second to ensure timestamp is newer than current s_lastValidYields.timestamp
+        vm.warp(block.timestamp + 1);
+        
+        BondYieldsResponse memory broken = yieldsDataBroken;
+        broken.timestamp = block.timestamp;
+        
+        // Push broken data to oracle
+        _updateBondOracleYields(broken);
+        
+        // Trigger RiskManager validation to freeze the anomalous slot
+        vm.prank(deployer);
+        treasuryBondToken.updateYieldsValues();
+    }
+
+    /**
+     * @dev Helper to push broken reserves data into oracle and trigger RiskManager validation.
+     *      The corrupted 10Y bond value (×100 error) will cause the 10Y slot to be frozen.
+     *      Useful for testing protocol behavior when oracle data is corrupted.
+     *      Warps time forward by 1 second to ensure the new data is newer than the previous valid data.
+     */
+    function _updateReservesDataBroken() internal {
+        // Warp forward 1 second to ensure timestamp is newer than current s_lastValidReserves.timestamp
+        vm.warp(block.timestamp + 1);
+        
+        ReservesResponse memory broken = reservesDataBroken;
+        broken.timestamp = block.timestamp;
+        
+        // Push broken data to oracle (internally pranks as reservesFunctionsConsumer)
+        _updateReservesOracleValues(broken);
+        
+        // Trigger RiskManager validation to freeze the anomalous slot
+        vm.prank(deployer);
+        treasuryBondToken.updateReserveValues();
     }
 
  

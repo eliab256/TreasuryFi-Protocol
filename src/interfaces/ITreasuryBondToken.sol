@@ -104,6 +104,20 @@ interface ITreasuryBondToken is IERC3643 /*, IERC3525 */ {
     // --- Getters ---
     function getTotalLiabilitiesPerSlot(uint256 _slot) external view returns (uint256);
     function getPositionData(uint256 _tokenId) external view returns (PositionData memory);
+
+    /**
+     * @notice Calculates the claimable yield in USDC for a given tokenId based on current timestamp.
+     * @dev This function:
+     *      1. Retrieves position data (entryYield, lastClaimTimestamp)
+     *      2. Calculates principal in USD based on token balance and entryNAV
+     *      3. Calculates time elapsed since last claim
+     *      4. Computes gross accrued yield: principal * yield * elapsed / (365 days * PERCENTAGE_PRECISION)
+     *      5. Deducts management fee from gross accrued
+     *      6. Converts net yield from USD (18 decimals) to USDC (6 decimals)
+     * @param _tokenId The ERC-3525 token ID representing the position.
+     * @return claimableYieldUsdc The net claimable yield in USDC (after fees), with 6 decimals.
+     */
+    function getClaimableYieldInUsdc(uint256 _tokenId) external view returns (uint256);
     function getMinimumDepositAmount() external view returns (uint256);
     function assertSolvency() external view;
     function getNextRedemptionWindow(uint256 _slot) external view returns (uint256 nextWindowOpen, uint256 windowDuration);

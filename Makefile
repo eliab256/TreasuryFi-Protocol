@@ -26,7 +26,7 @@ test-reserves-automation:
 
 # Usage: make test-single NAME=testFunctionName
 test-single:
-	forge test --match-test $(NAME) -vvvv
+	forge test --match-test $(NAME) -vvv
 
 # ─── Inspect ─────────────────────────────────────────────────────────────────
 

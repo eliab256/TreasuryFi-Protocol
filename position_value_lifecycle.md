@@ -9,13 +9,23 @@ token.value = unità di esposizione al tasso del bucket
 valore USDC  = token.value × NAV(slot, t) / PAR_VALUE
 ```
 
-Il NAV segue il modello Modified Duration:
+Il NAV segue il modello Modified Duration. Quando i tassi salgono rispetto all'entry il NAV scende, quando scendono sale:
 
 ```
-NAV(t) = PAR × [1 - D_mod × (y_current(t) - y_entry)]
+tassi saliti:  NAV(t) = PAR × (MAX_PERCENTAGE - D_mod × (y_current - y_entry) / PERCENTAGE_PRECISION) / MAX_PERCENTAGE
+tassi scesi:   NAV(t) = PAR × (MAX_PERCENTAGE + D_mod × (y_entry - y_current) / PERCENTAGE_PRECISION) / MAX_PERCENTAGE
 ```
 
-dove `y_entry` è il yield al momento del mint e `D_mod` è la duration modificata dello slot (1.9 per 2Y, 4.5 per 5Y, 8.7 per 10Y, 19.5 per 30Y).
+dove `y_entry` è il yield al momento del mint, `y_current` è il yield corrente, e `D_mod` è la duration modificata dello slot:
+
+| Slot | D_mod |
+|------|-------|
+| 2Y   | 1.9   |
+| 5Y   | 4.5   |
+| 10Y  | 8.5   |
+| 30Y  | 18    |
+
+**Cap a zero:** se lo shock di tasso è abbastanza severo da portare il discount a ≥ 100% (`D_mod × yieldShock ≥ MAX_PERCENTAGE`), il NAV viene cappato a 0 anziché diventare negativo. In quel caso `closePosition` funziona normalmente — il token viene bruciato, le liabilities ridotte, e l'utente riceve esclusivamente lo yield accumulato fino a quel momento (il payout sul capitale è 0). Questo è un guardrail di sicurezza matematica: con i parametri attuali il RiskManager congela lo slot per `ExcessiveYieldShock` prima che questo scenario si materializzi in produzione.
 
 ---
 
@@ -23,30 +33,33 @@ dove `y_entry` è il yield al momento del mint e `D_mod` è la duration modifica
 
 L'utente deposita USDC. Il protocollo:
 
-1. Preleva la mint fee (0.10%) e la invia al `feeCollector`
+1. Preleva la entry fee (0.2%) e la invia al `feeCollector`
 2. Trasferisce i USDC netti al `Treasury`
 3. Legge il yield corrente dall'oracle → `y_current = BondOracle.getYield(slot)`
-4. Calcola il NAV corrente → `entryNAV = PAR × [1 - D_mod × (y_current - y_current)]` = PAR (al mint, per definizione il NAV è sempre PAR se l'utente è il primo holder, oppure il NAV di mercato corrente)
-5. Calcola le unità da mintare → `valueToMint = (usdcNetti × PAR) / entryNAV`
-6. Minta il token ERC-3525 con `value = valueToMint`
-7. Salva `PositionData`:
+4. Converte i USDC netti in USD a 18 decimali tramite il price feed USDC/USD → `netAmountInUsd`
+5. Minta il token ERC-3525 con `value = netAmountInUsd`
+6. Salva `PositionData`:
 
 ```solidity
 s_fromIdToPositionData[tokenId] = PositionData({
     entryYield:          y_current,       // yield bloccato al mint, in bps
-    entryNAV:            entryNAV,        // NAV per unità al mint
-    mintTimestamp:       block.timestamp, // per lock period
+    entryNAV:            C.PAR,           // sempre PAR al mint (vedere nota sotto)
+    mintTimestamp:       block.timestamp, // per lock period e early redeem fee
     lastClaimTimestamp:  block.timestamp  // inizializzato al mint
 });
 ```
 
 ### Cosa rappresenta `entryNAV`
 
-`entryNAV` è il **valore nominale per unità** al momento dell'acquisto. Moltiplicato per `value` restituisce il principale USDC investito (al netto delle fee), che è la base su cui vengono calcolati gli interessi — equivalente al face value in TradFi.
+`entryNAV` è fissato a `PAR` al momento del mint. Insieme a `token.value`, permette di ricostruire il principale USD investito in qualsiasi momento:
 
 ```
-principalUsdc = token.value × entryNAV / PAR_VALUE
+principalUsd = token.value × entryNAV / PAR_VALUE
+             = token.value × PAR / PAR
+             = token.value
 ```
+
+`entryNAV` è progettato per supportare un futuro mercato secondario: quando un token cambia mano tramite trasferimento, il nuovo holder eredita l'`entryNAV` originale del sorgente (che potrebbe essere diverso da PAR se il token è stato trasferito dopo una variazione di tassi), preservando la corretta base di calcolo degli interessi.
 
 ---
 
@@ -55,9 +68,9 @@ principalUsdc = token.value × entryNAV / PAR_VALUE
 Dopo il mint, il valore USDC della posizione varia con i tassi di mercato anche se `token.value` rimane invariato.
 
 ```
-t=0  (mint):    y=4.50%, NAV=PAR,       valore USDC = 1000
-t=6m (tassi↑): y=5.00%, NAV=PAR×[1-8.7×0.005]=0.9565, valore USDC = 956.5
-t=12m (tassi↓): y=4.00%, NAV=PAR×[1-8.7×(-0.005)]=1.0435, valore USDC = 1043.5
+t=0  (mint):    y=4.50%, NAV=PAR,                                  valore USDC = 1000
+t=6m (tassi↑): y=5.00%, NAV=PAR×(1-8.5×0.005)=PAR×0.9575,        valore USDC = 957.5
+t=12m (tassi↓): y=4.00%, NAV=PAR×(1+8.5×0.005)=PAR×1.0425,       valore USDC = 1042.5
 ```
 
 `token.value` non cambia. Cambia solo il prezzo in USDC di ogni unità.
@@ -67,13 +80,15 @@ t=12m (tassi↓): y=4.00%, NAV=PAR×[1-8.7×(-0.005)]=1.0435, valore USDC = 1043
 ## 4. Chiusura completa — closePosition()
 
 1. Legge `token.value` e `slotOf(tokenId)`
-2. Calcola il NAV corrente → `navNow = PAR × [1 - D_mod × (y_current - y_entry)]`
-3. Calcola il payout → `payout = token.value × navNow / PAR`
-4. Verifica lock period → se `block.timestamp < mintTimestamp + lockPeriod[slot]`:
-   - `earlyFee = payout × EARLY_REDEEM_FEE_BPS / 10000`
-   - `payout -= earlyFee` → fee al `feeCollector`
-5. Brucia il token ERC-3525
-6. Trasferisce `payout` USDC dal Treasury all'utente
+2. Calcola il NAV corrente in base alla direzione del movimento dei tassi (vedi sezione 1)
+3. Calcola il payout lordo → `usdcPayoutBeforeFees = token.value × navNow / PAR`, convertito da USD18 a USDC
+4. Calcola l'early redemption fee se `block.timestamp < mintTimestamp + penaltyPeriod[slot]`:
+   - la fee decresce linearmente da `PERCENTAGE_EXIT_FEE_MAX` (5%) a 0 nel corso del penalty period
+   - `earlyRedeemFee = usdcPayoutBeforeFees × currentFeePercentage / MAX_PERCENTAGE`
+   - `usdcPayout = usdcPayoutBeforeFees - earlyRedeemFee` → fee al `feeCollector`
+5. Verifica che il Treasury abbia liquidità sufficiente per coprire `usdcPayout + yieldAccumulato + fees`
+6. Brucia il token ERC-3525
+7. Trasferisce `usdcPayout + yieldAccumulato` dal Treasury all'utente
 
 Il payout può essere superiore o inferiore al deposito originale a seconda del movimento dei tassi — esattamente come la vendita di un bond sul mercato secondario prima della scadenza.
 
@@ -107,43 +122,47 @@ token #42, slot=3, value=1000  →  token #42, slot=3, value=600
                                    token #99, slot=3, value=400  ← nuovo token per il ricevente
 ```
 
-### Propagazione di mintedAt
+### Propagazione di mintTimestamp
 
 Il nuovo token #99 eredita il `mintTimestamp` del token sorgente #42. Questo è fondamentale: il ricevente non può resettare il lock period ricevendo un trasferimento.
 
-```solidity
-// in _afterValueTransfer, quando _from != address(0) e _to != address(0)
-s_fromIdToPositionData[_toTokenId] = PositionData({
-    entryYield:         s_fromIdToPositionData[_fromTokenId].entryYield,
-    entryNAV:           s_fromIdToPositionData[_fromTokenId].entryNAV,
-    mintTimestamp:      s_fromIdToPositionData[_fromTokenId].mintTimestamp,  // ereditato
-    lastClaimTimestamp: block.timestamp  // reset al momento del trasferimento
-});
-```
-
-`lastClaimTimestamp` viene resettato a `block.timestamp` — non al mint del sorgente — perché prima del trasferimento il contratto deve chiamare `_claimYield(fromTokenId)` per liquidare gli interessi maturati fino a quel momento in capo al mittente. Il nuovo token parte da zero interessi maturati.
+`lastClaimTimestamp` viene resettato a `block.timestamp` — non al mint del sorgente — perché il contratto liquida gli interessi maturati sul token sorgente prima della scissione. Il nuovo token parte da zero interessi maturati.
 
 ### Flusso completo del trasferimento
+
+Tutta la logica avviene dentro `_beforeValueTransfer`, che per i trasferimenti delega a `_beforeTransfer`:
 
 ```
 transferFrom(fromTokenId=#42, to=alice, value=400)
   │
-  ├── 1. _beforeValueTransfer()
-  │       ├── ERC3643: isVerified(alice)? KYC check
-  │       └── RiskManager: slot frozen? oracle stale?
-  │
-  ├── 2. _claimYield(#42)   ← liquida interessi maturati sul token sorgente
-  │       └── paga al mittente gli interessi su tutto il value prima della scissione
-  │
-  ├── 3. ERC3525: crea token #99 con value=400, copia slot da #42
-  │
-  ├── 4. _afterValueTransfer()
-  │       └── copia PositionData da #42 a #99
-  │           lastClaimTimestamp[#99] = block.timestamp
-  │
-  └── 5. token #42: value=600, lastClaimTimestamp aggiornato dal claim al punto 2
-       token #99: value=400, lastClaimTimestamp=now, entryYield/entryNAV ereditati
+  └── _beforeValueTransfer()
+        │
+        ├── 1. ERC3643: isVerified(alice)? KYC/AML check
+        │
+        └── _beforeTransfer()
+              │
+              ├── 2. _claimYield(#42)
+              │       └── liquida gli interessi maturati su tutto il value del sorgente
+              │           prima della scissione; paga al mittente; aggiorna lastClaimTimestamp[#42]
+              │
+              ├── 3. _riskManagerBeforeTransferLiquidity()
+              │       └── verifica liquidità Treasury per yield + fee appena calcolati
+              │
+              ├── 4. i_treasury.transferUsdcFromYieldClaim()
+              │       └── trasferisce yield al mittente
+              │
+              └── 5. propaga PositionData da #42 a #99
+                      entryYield:         ereditato da #42
+                      entryNAV:           ereditato da #42
+                      mintTimestamp:      ereditato da #42   ← lock period non resettabile
+                      lastClaimTimestamp: block.timestamp    ← parte da zero
 ```
+
+Dopo il completamento della tx:
+- token #42: `value=600`, `lastClaimTimestamp` aggiornato al momento del claim (step 2)
+- token #99: `value=400`, `lastClaimTimestamp=now`, `entryYield`/`entryNAV` ereditati da #42
+
+`_afterValueTransfer` è vuoto nell'implementazione corrente.
 
 ---
 
@@ -155,8 +174,8 @@ transferFrom(fromTokenId=#42, to=alice, value=400)
 | `claimYield` | Invariato | lastClaim aggiornato | -interessi |
 | `closePartialPosition` | Ridotto | Invariata | -payout parziale |
 | `closePosition` | Distrutto | Eliminata | -payout totale |
-| `transferFrom(tokenId→addr)` | Invariato (token intero) | Copiata al ricevente | 0 |
-| `transferFrom(tokenId, addr, value)` | Ridotto su sorgente | Copiata + lastClaim reset su nuovo | 0 |
+| `transferFrom(tokenId→addr)` | Invariato (token intero) | Copiata al ricevente | -yield liquidato al mittente |
+| `transferFrom(tokenId, addr, value)` | Ridotto su sorgente | Copiata + lastClaim reset su nuovo | -yield liquidato al mittente |
 
 ---
 
@@ -165,7 +184,7 @@ transferFrom(fromTokenId=#42, to=alice, value=400)
 In qualsiasi momento, per qualsiasi token:
 
 ```
-principalUsdc = balanceOf(tokenId) × entryNAV / PAR_VALUE
+principalUsd = balanceOf(tokenId) × entryNAV / PAR_VALUE
 ```
 
-Questo valore è **sempre ricostruibile on-chain** senza dati storici esterni, perché `entryNAV` è salvato in `PositionData` al mint.
+Questo valore è espresso in USD a 18 decimali ed è **sempre ricostruibile on-chain** senza dati storici esterni, perché `entryNAV` è salvato in `PositionData` al mint. La conversione a USDC avviene al momento del pagamento tramite il price feed USDC/USD.
