@@ -20,8 +20,6 @@ import {IReservesAutomation} from "../interfaces/IReservesAutomation.sol";
 import {ITreasury} from "../interfaces/ITreasury.sol";
 import {ITreasuryBondToken} from "../interfaces/ITreasuryBondToken.sol";
 
-import {console2} from "forge-std/console2.sol";
-
 /**
  * @title TreasuryBondToken
  * @notice ERC-3525 token representing fractionalized positions in US Treasury bond buckets.
@@ -31,7 +29,6 @@ import {console2} from "forge-std/console2.sol";
  */
 contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager, UsdcUsdConverter, ReentrancyGuard{
     bytes32 public constant OWNER_ROLE = keccak256("OWNER_ROLE"); 
-    bytes32 public constant FEES_MANAGER_ROLE = keccak256("FEES_MANAGER_ROLE");
     bytes32 public constant AUTOMATION_TRIGGERER_ROLE = keccak256("AUTOMATION_TRIGGERER_ROLE");
     bytes32 public constant UPDATE_RISK_MANAGER_VALUES_ROLE = keccak256("UPDATE_RISK_MANAGER_VALUES_ROLE");
 
@@ -115,7 +112,6 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
 
         //_grantRole(DEFAULT_ADMIN_ROLE, _params.admin);
         _grantRole(OWNER_ROLE, _params.admin);
-        _grantRole(FEES_MANAGER_ROLE, _params.feesCollector);
         _grantRole(AUTOMATION_TRIGGERER_ROLE, _params.admin);
         _grantRole(UPDATE_RISK_MANAGER_VALUES_ROLE, _params.admin);
 
@@ -212,7 +208,6 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         address owner = ownerOf(_tokenId);
         uint256 slot = slotOf(_tokenId);
         (uint256 usdcPayout, uint256 netYieldToClaimInUsdc, uint256 managmentFeeInUsdc , uint256 earlyRedeemFeeUsdc, uint256 currentNAV) = _closePositionValue(_tokenId, slot, _valueToBurn);
-        console2.log("earlyRedeemFeeUsdc: ", earlyRedeemFeeUsdc);
         uint256 totalUsdcOutFromSlotLiquidity = usdcPayout + netYieldToClaimInUsdc + earlyRedeemFeeUsdc + managmentFeeInUsdc;
         _riskManagerBeforeTransferLiquidity(slot, totalUsdcOutFromSlotLiquidity);
         _burnValue(_tokenId, _valueToBurn);
@@ -423,7 +418,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         // questa funzione viene usata anche durante i transfer 
         uint256 principalUsd = YieldsMath.calculatePrincipalUsd(value , positionData.entryNAV, C.PAR);
         uint256 elapsedTime = block.timestamp - positionData.lastClaimTimestamp;
-        uint256 grossAccrued = principalUsd * positionData.entryYield * elapsedTime / (365 days * C.PERCENTAGE_PRECISION);
+        uint256 grossAccrued = principalUsd * positionData.entryYield * elapsedTime / (365 days * C.MAX_PERCENTAGE);
 
         // retreive managment fee and net payout from gross accrued yield
         uint256 managmentFee = grossAccrued * C.PERCENTAGE_YIELD_FEE / C.MAX_PERCENTAGE;
@@ -774,7 +769,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         uint256 elapsedTime = block.timestamp - posData.lastClaimTimestamp;
         
         // 5. Calculate gross accrued yield in USD (18 decimals)
-        uint256 grossAccrued = principalUsd * posData.entryYield * elapsedTime / (365 days * C.PERCENTAGE_PRECISION);
+        uint256 grossAccrued = principalUsd * posData.entryYield * elapsedTime / (365 days * C.MAX_PERCENTAGE);
         
         // 6. Calculate management fee
         uint256 managmentFee = grossAccrued * C.PERCENTAGE_YIELD_FEE / C.MAX_PERCENTAGE;

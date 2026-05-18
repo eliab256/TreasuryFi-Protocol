@@ -188,3 +188,79 @@ principalUsd = balanceOf(tokenId) × entryNAV / PAR_VALUE
 ```
 
 Questo valore è espresso in USD a 18 decimali ed è **sempre ricostruibile on-chain** senza dati storici esterni, perché `entryNAV` è salvato in `PositionData` al mint. La conversione a USDC avviene al momento del pagamento tramite il price feed USDC/USD.
+
+---
+
+## 9. Funzioni amministrative ERC-3643
+
+Queste funzioni implementano i poteri dell'emittente previsti dallo standard ERC-3643 (T-REX) per i security token regolamentati. Non interagiscono con il RiskManager — operano esclusivamente sullo strato di compliance e ownership dei token.
+
+### 9.1 forceTransfer — `OWNER_ROLE`
+
+```solidity
+function forceTransfer(address _from, address _to, uint256 _tokenId) public onlyRole(OWNER_ROLE) returns (bool)
+```
+
+Trasferimento forzato di un token, bypassando i controlli di compliance (KYC, freeze wallet) e le approvazioni ERC-721. Casi d'uso: ordine regolatorio, sequestro di asset, correzione di un trasferimento errato.
+
+**Sequenza:**
+1. Liquida lo yield maturato e lo paga a `_from` (identico al comportamento del trasferimento normale)
+2. Sblocca eventuali `frozenValue` sul token (altrimenti il transfer ERC-3525 fallirebbe)
+3. Esegue `_transferTokenId` che bypassa i controlli di compliance
+
+Il flag `s_forcedTransfer` viene impostato a `true` prima della chiamata e resettato a `false` dopo (anche in caso di revert tramite try/catch), così `_beforeValueTransfer` sa di essere in un contesto forzato.
+
+### 9.2 recoveryAddress — `RECOVERY_ROLE`
+
+```solidity
+function recoveryAddress(address _lostWallet, address _newWallet, address _investorOnchainID) public onlyRole(RECOVERY_ROLE) returns (bool)
+```
+
+Recupero di token da un wallet inaccessibile (chiave privata persa, wallet compromesso) verso un nuovo wallet dello stesso investitore. Richiede che `_investorOnchainID` sia l'ONCHAINID verificato sia del wallet perso che di quello nuovo, garantendo che il recupero avvenga verso la stessa persona fisica/giuridica.
+
+**Implementazione interna (`_executeRecoveryTransfer`):** scatta uno snapshot degli ID token prima del trasferimento (per evitare problemi di enumerazione durante il loop), poi chiama `_transferTokenId` per ogni token. I `frozenValue` per tokenId migrano automaticamente (il mapping `s_frozenValues[tokenId]` rimane invariato — le chiavi sono gli ID del token, non l'address).
+
+### 9.3 pause / unpause — `PAUSER_ROLE`
+
+```solidity
+function pause()   public onlyRole(PAUSER_ROLE)
+function unpause() public onlyRole(PAUSER_ROLE)
+```
+
+Pausa globale del protocollo. Quando attiva, tutti i trasferimenti ERC-3525 e ERC-721 vengono bloccati dall'hook `_beforeValueTransfer` tramite il controllo ERC-3643. Casi d'uso: incidente di sicurezza, manutenzione critica, ordine regolatorio urgente.
+
+`openNewPosition`, `closePosition`, `claimYield` chiamano tutti internamente transfer/burn/mint — sono tutti bloccati dalla pausa.
+
+### 9.4 setAddressFrozen / batchSetAddressFrozen — `FREEZER_ROLE`
+
+```solidity
+function setAddressFrozen(address _userAddress, bool _freeze) external onlyRole(FREEZER_ROLE)
+function batchSetAddressFrozen(address[] calldata _userAddresses, bool[] calldata _freeze) external onlyRole(FREEZER_ROLE)
+```
+
+Congela o scongela un indirizzo. Un indirizzo congelato non può ricevere o inviare token — il check avviene in `_beforeValueTransfer` tramite ERC-3643. Casi d'uso: procedimento AML, ordine di blocco da autorità regolatoria.
+
+La versione batch permette di operare su più indirizzi in una singola transazione.
+
+### 9.5 freezePartialTokens / unfreezePartialTokens / batch — `FREEZER_ROLE`
+
+```solidity
+function freezePartialTokens(uint256 _tokenId, uint256 _amount)   external onlyRole(FREEZER_ROLE)
+function unfreezePartialTokens(uint256 _tokenId, uint256 _amount) external onlyRole(FREEZER_ROLE)
+function batchFreezePartialTokens(uint256[] calldata _tokenId, uint256[] calldata _amounts)   external onlyRole(FREEZER_ROLE)
+function batchUnfreezePartialTokens(uint256[] calldata _tokenId, uint256[] calldata _amounts) external onlyRole(FREEZER_ROLE)
+```
+
+Congela una quantità parziale del `value` di un token specifico. Il `value` congelato non può essere trasferito o bruciato fino allo sblocco. Diversamente da `setAddressFrozen` che opera a livello di wallet, il freeze parziale opera a livello di singola posizione — utile per bloccare selettivamente solo parte dell'esposizione di un investitore.
+
+`forceTransfer` sblocca automaticamente il `frozenValue` prima di eseguire il trasferimento forzato.
+
+### Tabella ruoli amministrativi
+
+| Funzione | Ruolo | Bypassa compliance? | Liquida yield? |
+|---|---|---|---|
+| `forceTransfer` | `OWNER_ROLE` | Sì | Sì |
+| `recoveryAddress` | `RECOVERY_ROLE` | Sì | No |
+| `pause` / `unpause` | `PAUSER_ROLE` | — (blocca tutto) | — |
+| `setAddressFrozen` | `FREEZER_ROLE` | No | No |
+| `freezePartialTokens` | `FREEZER_ROLE` | No | No |

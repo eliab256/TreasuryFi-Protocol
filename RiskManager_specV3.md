@@ -53,7 +53,7 @@ openNewPosition()
                             │       ├── _checkSlotSafe()          [isStale yields+reserves + frozen]
                             │       ├── _validateMintReserves()   [coverage check + dynamic buffer]
                             │       └── s_totalLiabilitiesPerSlot[slot] += value
-                            └── init PositionData
+                            └── init PositionData (entryNAV = C.PAR)
 ```
 
 ### Flusso burn (closePosition / closePartialPosition)
@@ -129,7 +129,9 @@ Risponde a: *"lo SPV ha abbastanza patrimonio per coprire tutte le posizioni ape
 
 ```
 portfolioValue[slot] = bondsValue[slot] + cashBuffer[slot]  [USD 18 dec]
-requiredReserves     = (liabilities[slot] + mintValue) × reserveBuffer / MAX_PERCENTAGE
+requiredReserves     = (liabilities[slot] + mintValue) × effectiveBuffer / MAX_PERCENTAGE
+
+dove effectiveBuffer = reserveBuffer × _calculateDynamicBuffer(slot) / MAX_PERCENTAGE
 
 if portfolioValue[slot] < requiredReserves → revert InsufficientReserves
 ```
@@ -153,7 +155,7 @@ Cash buffer slot 10Y (SPV):       80.000 USD
 USDC Treasury slot 10Y:           20.000 USDC
 
 Utente vuole riscattare 50.000 USDC:
-  Reserve check al mint (precedente): 1.180.000 > 1.100.000 × 1_100_000 / 1_000_000 → PASS ✅
+  Reserve check al mint (precedente): 1.180.000 > 1.100.000 × 1_120_000 / 1_000_000 → PASS ✅
   Liquidity check al burn: 20.000 < 50.000 → REVERT ❌
 
 → Non è insolvenza. Lo SPV deve chiamare injectLiquidity() con 30.000 USDC.
@@ -240,7 +242,7 @@ uint256 internal constant USD8_TO_USD18          = 1e10; // fattore conversione 
 
 ### Nota su `lockPeriod`
 
-`lockPeriod` non è in `SlotRiskParams` perché è già gestito via `PENALTY_PERIOD_*` in `TokenConstants` e via `_calculateEarlyRedeemFee` in `TreasuryBondToken`. Il lock è un soft deterrent economico (fee decrescente), non un hard block. Se si vuole aggiungere un hard block in V2, si aggiunge `lockPeriod` a `SlotRiskParams` con la relativa validazione.
+`lockPeriod` non è in `SlotRiskParams` perché è già gestito via `PENALTY_PERIOD_*` in `TokenConstants` e via `_calculateEarlyRedeemFee` in `TreasuryBondToken`. Il lock è un soft deterrent economico (fee decrescente linearmente da `PERCENTAGE_EXIT_FEE_MAX` a 0), non un hard block. Se si vuole aggiungere un hard block in V2, si aggiunge `lockPeriod` a `SlotRiskParams` con la relativa validazione.
 
 ---
 
@@ -248,13 +250,14 @@ uint256 internal constant USD8_TO_USD18          = 1e10; // fattore conversione 
 
 | Grandezza | Unità | Note |
 |---|---|---|
-| Yield da BondOracle | bps (es. 450 = 4.50%) | Scala `PERCENTAGE_PRECISION` = 10000 |
+| Yield da BondOracle | bps ×100 (es. **45000 = 4.50%**) | Scala `PERCENTAGE_PRECISION` = 10000, source JS: `parseFloat(obs.value) * 10000` |
 | USD values da ReservesOracle (raw) | USD 8 dec | Formato Chainlink price feed |
 | USD values nella cache `s_lastValidReserves` | USD 18 dec | Convertiti con `* USD8_TO_USD18` al momento dello storage |
 | Liabilities `s_totalLiabilitiesPerSlot` | USD 18 dec | Coerente con la cache |
 | USDC amounts (Treasury, payout utente) | USDC 6 dec | Formato token USDC |
 | Fee percentages | scalate per `PERCENTAGE_PRECISION` | Base `MAX_PERCENTAGE = 100 * PERCENTAGE_PRECISION` |
 | PAR | 1e18 | Valore nominale per unità token |
+| `principalUsd` | USD 18 dec | `token.value × entryNAV / PAR` — convertito a USDC solo al pagamento |
 
 ### Perché convertire le reserves a 18 dec al momento dello storage
 
@@ -277,7 +280,7 @@ constructor(
     address _reservesAutomation,
     address _reservesOracle,
     address _yieldsOracle,
-    address _treasury          // ← aggiunto rispetto a V2, necessario per _validateInstantLiquidity
+    address _treasury          // necessario per _validateInstantLiquidity
 )
 ```
 
@@ -312,7 +315,7 @@ delta    = |yield_corrente - s_lastValidSlotMarketData[slot].yield|  [bps]
 if delta > MAX_YIELD_SHOCK_BPS (= 50000 bps = 5%) → freeze
 ```
 
-Esempio: yield passa da 450 bps a 1100 bps → delta = 650 > 500 → freeze.
+Esempio: yield passa da 45000 (4.50%) a 110000 (11.00%) → delta = 65000 > 50000 → freeze.
 
 ### 6.3 Cache update — reserves: `_updateReservesValues()`
 
@@ -426,7 +429,7 @@ function _riskManagerBeforeTransferLiquidity(uint256 _slot, uint256 _requiredLiq
 
 Chiamato in `closePosition`, `closePartialPosition`, `claimYield` e `_beforeTransfer` (per lo yield settlato prima del transfer) con il totale USDC in uscita. Gestisce sia il check di liquidità che il rate limit in un unico punto, usando l'importo USDC corretto.
 
-> **Nota su `claimYield`:** Il calcolo dello yield è basato esclusivamente sulla `PositionData` del token (entryYield, lastClaimTimestamp), non sui dati oracle correnti. Pertanto `claimYield` non richiede `_checkSlotSafe` — lo yield può essere distribuito anche se i dati oracle sono temporaneamente non aggiornati o lo slot è frozen.
+> **Nota su `claimYield`:** Il calcolo dello yield è basato esclusivamente sulla `PositionData` del token (`entryYield`, `lastClaimTimestamp`), non sui dati oracle correnti. Pertanto `claimYield` non richiede `_checkSlotSafe` — lo yield può essere distribuito anche se i dati oracle sono temporaneamente non aggiornati o lo slot è frozen.
 
 ### 6.9 Configurazione parametri slot: `_setSlotRiskParams`
 
@@ -521,12 +524,13 @@ Esposta pubblicamente in `TreasuryBondToken` via `assertSolvency() external view
 **Formula:**
 ```
 portfolioValue   = bondsValue[slot] + cashBuffer[slot]
-requiredReserves = (liabilities[slot] + mintValue) × reserveBuffer / MAX_PERCENTAGE
+effectiveBuffer  = reserveBuffer × _calculateDynamicBuffer(slot) / MAX_PERCENTAGE
+requiredReserves = (liabilities[slot] + mintValue) × effectiveBuffer / MAX_PERCENTAGE
 
 if portfolioValue < requiredReserves → revert InsufficientReserves
 ```
 
-**Esempio numerico:**
+**Esempio numerico (curva normale, D_mod 10Y = 8.5):**
 ```
 bondsValue[10Y]   = 950.000e18 USD
 cashBuffer[10Y]   =  80.000e18 USD
@@ -535,6 +539,8 @@ portfolioValue    = 1.030.000e18 USD
 liabilities[10Y]  =   800.000e18 USD
 mintValue         =   100.000e18 USD
 reserveBuffer     = 1_120_000  // 112% in PERCENTAGE_PRECISION
+dynamicMultiplier = 1_000_000  // 1x (curva normale)
+effectiveBuffer   = 1_120_000
 
 requiredReserves  = (800.000 + 100.000) × 1_120_000 / 1_000_000 = 1.008.000e18 USD
 
@@ -555,9 +561,6 @@ Nuovo mint bloccato per slot 10Y fino a ricopertura riserve
 
 **Implementazione:**
 ```solidity
-// I valori reserve e cashBuffer da SlotMarketData (USD 18 dec),
-// bufferPercentage da SlotRiskParams (PERCENTAGE_PRECISION scale).
-// Il dynamic multiplier (sezione 6.10) viene applicato prima del calcolo.
 function _validateMintReserves(
     uint256 _slot,
     uint256 _value,
@@ -565,11 +568,11 @@ function _validateMintReserves(
     uint256 _cashBuffer,
     uint256 _bufferPercentage
 ) internal view {
-    uint256 portfolioValue     = _reserves + _cashBuffer;
-    uint256 currentLiab        = s_totalLiabilitiesPerSlot[_slot];
-    uint256 dynamicMultiplier  = _calculateDynamicBuffer(_slot);       // 1x se curva normale, >1x se invertita
-    uint256 effectiveBuffer    = _bufferPercentage * dynamicMultiplier / C.MAX_PERCENTAGE;
-    uint256 requiredReserves   = (currentLiab + _value) * effectiveBuffer / C.MAX_PERCENTAGE;
+    uint256 portfolioValue    = _reserves + _cashBuffer;
+    uint256 currentLiab       = s_totalLiabilitiesPerSlot[_slot];
+    uint256 dynamicMultiplier = _calculateDynamicBuffer(_slot);       // 1x se curva normale, >1x se invertita
+    uint256 effectiveBuffer   = _bufferPercentage * dynamicMultiplier / C.MAX_PERCENTAGE;
+    uint256 requiredReserves  = (currentLiab + _value) * effectiveBuffer / C.MAX_PERCENTAGE;
     if (portfolioValue < requiredReserves) {
         revert RiskManager__InsufficientReserves(_slot, portfolioValue, requiredReserves);
     }
@@ -677,7 +680,7 @@ function closePosition(uint256 _tokenId) public nonReentrant onlyApprovedOrOwner
         = _closePositionValue(_tokenId, slot, tokenBalance);
 
     // 2. Check liquidità on-chain + rate limit (entrambi in USDC, nessun side effect se oracle stale)
-    //    _riskManagerBeforeTransferLiquidity chiama:  
+    //    _riskManagerBeforeTransferLiquidity chiama:
     //      a) _validateInstantLiquidity — view, no side effect
     //      b) _validateRedeemRateLimit  — ⚠️ side effect: aggiorna s_dailyRedeemVolume
     uint256 totalOut = usdcPayout + netYield + earlyFee + mgmtFee;
@@ -714,6 +717,31 @@ _setSlotRiskParams(C.SLOT_30Y, SlotRiskParams({ reserveBuffer: 1_200_000, maxDai
 
 ---
 
+## 9. Custom Errors ed Eventi
+
+```solidity
+// Errors
+error RiskManager__StaleOracleData();
+error RiskManager__SlotFrozen(uint256 slot);
+error RiskManager__InsufficientLiquidity(uint256 slot, uint256 available, uint256 required);
+error RiskManager__InsufficientReserves(uint256 slot, uint256 portfolio, uint256 required);
+error RiskManager__RedemptionWindowClosed(uint256 slot, uint256 windowStart, uint256 windowEnd, uint256 current);
+error RiskManager__DailyRedeemLimitExceeded(uint256 slot, uint256 limit, uint256 requested);
+error RiskManager__SolvencyNotGuaranteed();
+error RiskManager__InvalidReserveBuffer();
+error RiskManager__InvalidSlotParams();
+
+// Events
+event SlotFrozen(uint256 indexed slot);
+event SlotUnfrozen(uint256 indexed slot);
+event InvalidYield(uint256 indexed slot, uint256 yield);
+event ExcessiveYieldShock(uint256 indexed slot, uint256 shockBps);
+event ExcessiveReserveShock(uint256 indexed slot, uint256 shockBps);
+event SlotRiskParamsUpdated(uint256 indexed slot, uint256 reserveBuffer, uint256 maxDailyRedeem, uint256 redeemWindowOpen, uint256 redeemWindowDuration);
+```
+
+---
+
 ## 10. Funzioni V2
 
 ### 10.1 Curve Blocking automatico
@@ -746,14 +774,17 @@ Aggiungere `windowCycleDays` a `SlotRiskParams` e modificare `_validateRedemptio
 
 ```
 1. _closePositionValue()         — calcolo valori (nessun side effect su liabilities)
-2. _validateRedemptionWindow()   — view, no side effect
-3. _validateInstantLiquidity()          — view su Treasury, no side effect
-4. _validateRedeemRateLimit()    — ⚠️ side effect: aggiorna s_dailyRedeemVolume
-5. _burn()                       — state changes token + _riskManagerBeforeBurn (liabilities)
-6. treasury.withdraw()           — trasferimento USDC
+2. _validateInstantLiquidity()   — view su Treasury, no side effect
+3. _validateRedeemRateLimit()    — ⚠️ side effect: aggiorna s_dailyRedeemVolume
+4. _burn()                       — state changes token + _riskManagerBeforeBurn (liabilities)
+   └── _riskManagerBeforeBurn()
+         ├── _checkSlotSafe()            — isStale + frozen
+         ├── _validateRedemptionWindow() — view, no side effect
+         └── s_totalLiabilitiesPerSlot -= value
+5. treasury.withdraw()           — trasferimento USDC
 ```
 
-I check con side effect (step 4) vanno dopo tutti i check view. Se un check view fa revert, lo storage non viene modificato. Il burn (step 5) va dopo tutti i check perché è irreversibile.
+I check con side effect (step 3) vanno dopo tutti i check view. Se un check view fa revert, lo storage non viene modificato. Il burn (step 4) va dopo tutti i check perché è irreversibile.
 
 ### Side effect nei lifecycle hook
 
@@ -772,7 +803,7 @@ vm.warp(1_700_000_000 - (1_700_000_000 % 7 days) + 6 days + 23 hours);
 // Imposta lastValidReserve a 1.000.000e8, poi simula update a 1.400.000e8 (+40% > 30%)
 // Atteso: ExcessiveReserveShock emesso, slot frozen
 
-// Test reserve coverage con dynamic buffer
+// Test reserve coverage con dynamic buffer (D_mod 10Y = 8.5)
 // Imposta reserves a 900.000e18, liabilities a 850.000e18, buffer 1_120_000 (112%)
 // Curva normale: required = 850.000 * 1_120_000 / 1_000_000 = 952.000 > 900.000 → revert
 // Curva invertita spread 50bps (2Y frozen=false, 10Y frozen=false):

@@ -22,16 +22,16 @@ TreasuryFi allows an issuer to mint security-compliant tokens that represent exp
 1. **Chainlink Functions** fetches real-time Treasury yields from the [FRED API](https://fred.stlouisfed.org/)
 2. **Chainlink Automation** triggers the fetch every 24 hours — no manual intervention
 3. **BondOracle** stores the latest yield per maturity bucket on-chain
-4. **ReserveOracle** attests the USD value of T-Bills held by the off-chain custodian (SPV)
+4. **ReservesOracle** attests the USD value of T-Bills held by the off-chain custodian (SPV)
 5. **TreasuryBondToken (ERC-3525)** uses both oracles to:
-   - **Gate minting** — `mint()` checks `ReserveOracle` to ensure reserves cover total supply before issuance
+   - **Gate minting** — `openNewPosition()` checks `ReservesOracle` and `RiskManager` to ensure reserves cover total liabilities before issuance
    - **Price mint/redeem** in USDC at NAV (modified duration model)
-   - **Collect protocol fees** — mint fee, management fee on yield, early redemption fee
-   - **Track mint timestamp** per token for lock period enforcement
+   - **Collect protocol fees** — entry fee (0.2%), management fee on yield (20%), early redemption fee (up to 5%)
+   - **Track mint timestamp** per token for penalty period enforcement
    - **Accrue yield** over time — holders call `claimYield()` for carry payments net of protocol fee
-   - **Enforce risk controls** — per-slot supply caps, oracle freshness checks, lock period gate
+   - **Enforce risk controls** — per-slot reserve buffer, oracle freshness checks, slot freeze on anomalous data, daily redeem limits, redemption windows
 6. **IdentityRegistry (T-REX / ONCHAINID)** ensures only KYC-verified investors can hold or receive tokens
-7. Every transfer checks: is the recipient verified? Is the oracle data fresh? Is the sender frozen?
+7. Every transfer checks: is the recipient verified? Is the oracle data fresh? Is the slot frozen?
 
 ### Contract Interaction Flow
 
@@ -49,17 +49,28 @@ BondFunctionsConsumer ──► Chainlink DON ──► FRED API
         │         (rolling pool of T-Bills per maturity bucket)
         │                    │
         │                    ▼ (attests reserve balance)
-        │         ReserveOracle (mock PoR on testnet)
+        │         ReservesOracle (mock PoR on testnet)
         │         [production: Chainlink PoR AggregatorV3Interface]
         │                    │
         ▼                    ▼
 TreasuryBondToken (ERC-3525)
-   ├── mint()          → checks ReserveOracle (PoR gate) + isVerified(to) + collects mint fee in USDC
-   ├── transferFrom()  → creates new tokenId inheriting mintedAt from source token
-   ├── redeem()        → burns value, pays USDC at NAV minus early redemption fee (if within lock period)
-   ├── claimYield()    → pays accrued carry in USDC net of management fee
-   ├── getNAV(tokenId) → modified duration model: par × [1 - D × (y_now - y_entry)]
-   └── freeze/unfreeze/forcedTransfer → admin controls
+   ├── openNewPosition()  → RiskManager reserve check + isVerified(to) + collects entry fee in USDC
+   ├── transferFrom()     → creates new tokenId inheriting mintTimestamp from source token, settles yield before split
+   ├── closePosition()    → burns value, pays USDC at NAV minus early redemption fee (if within penalty period)
+   ├── claimYield()       → pays accrued carry in USDC net of management fee
+   └── freeze/unfreeze/forcedTransfer → admin controls (ERC-3643)
+        │
+        ▼
+RiskManager (abstract, inherited by TreasuryBondToken)
+   ├── _riskManagerBeforeMint()             → reserve coverage check + liabilities update
+   ├── _riskManagerBeforeBurn()             → staleness/freeze check + liabilities update
+   ├── _riskManagerBeforeTransferLiquidity() → on-chain liquidity check + rate limit
+   ├── updateYieldsValues()                 → validates oracle data, freezes anomalous slots
+   └── updateReserveValues()                → validates oracle data, freezes anomalous slots
+        │
+        ▼
+Treasury
+   └── holds USDC per slot, handles deposits/withdrawals/fee accounting
         │
         ▼
 IdentityRegistry (T-REX)
@@ -76,20 +87,45 @@ ClaimIssuer (ONCHAINID)
 
 ```
 src/
+├── types.sol                           # Shared structs: PositionData, SlotRiskParams, constructor params
+│
 ├── automation/
-│   └── BondAutomation.sol           # Chainlink Automation: triggers 24h yield update
+│   ├── BaseAutomation.sol              # Abstract base: Chainlink Automation with 24h interval + grace period logic
+│   ├── BondAutomation.sol              # Chainlink Automation: triggers yield update
+│   ├── ReservesAutomation.sol          # Chainlink Automation: triggers reserves update
+│   └── UpdateRiskManagerAutomation.sol # Triggers RiskManager cache update on-chain
 │
 ├── interfaces/
-│   ├── IBondOracle.sol              # Interface for BondOracle (used by token)
-│   └── IReserveOracle.sol           # Interface for ReserveOracle (used by token)
+│   ├── IBaseAutomation.sol
+│   ├── IBondAutomation.sol
+│   ├── IBondFunctionsConsumer.sol
+│   ├── IBondOracle.sol
+│   ├── IERC3525.sol
+│   ├── IERC3643.sol
+│   ├── IReservesAutomation.sol
+│   ├── IReservesFunctionsConsumer.sol
+│   ├── IReservesOracle.sol
+│   ├── ITreasury.sol
+│   ├── ITreasuryBondToken.sol
+│   └── IUpdateRiskManagerAutomation.sol
+│
+├── library/
+│   └── YieldsMath.sol                  # NAV and yield accrual math
 │
 ├── oracles/
-│   ├── BondOracle.sol               # On-chain yield storage (pure storage, no Chainlink dep)
-│   ├── BondFunctionsConsumer.sol    # Chainlink Functions client: FRED API → BondOracle
-│   └── ReserveOracle.sol            # Mock Proof of Reserve: attests custodian reserve balance
+│   ├── BondOracle.sol                  # On-chain yield storage per slot
+│   ├── BondFunctionsConsumer.sol       # Chainlink Functions client: FRED API → BondOracle
+│   ├── ReservesOracle.sol              # Mock Proof of Reserve: attests custodian reserve balance
+│   └── ReservesFunctionsConsumer.sol   # Chainlink Functions client for reserves
 │
 └── tokens/
-    └── TreasuryBondToken.sol        # ERC-3525 token with T-REX compliance + PoR mint gate + fee model
+    ├── TreasuryBondToken.sol           # ERC-3525 token: lifecycle, fees, compliance
+    ├── RiskManager.sol                 # Abstract: oracle validation, slot freeze, reserve/liquidity checks
+    ├── Treasury.sol                    # USDC liquidity management per slot
+    ├── UsdcUsdConverter.sol            # USDC/USD conversion via Chainlink price feed
+    ├── ERC3525.sol                     # Semi-fungible token base
+    ├── ERC3643.sol                     # T-REX compliance base
+    └── TokenConstants.sol              # Protocol-wide constants
 ```
 
 ---
@@ -142,28 +178,30 @@ All major tokenized Treasury protocols share the same structural model:
 Investor USDC
       │
       ▼
-Smart Contract ──────────────────────────────────────────────┐
-      │                                                       │
-      │  checks before mint:                                  │
-      │  reserveOracle.isReserveSufficient(mintCost)          │
-      │                                                       │
-      ▼                                                       │
-Custodian / SPV (off-chain)                                   │
-      │                                                       │
-      │  holds rolling pool of T-Bills per maturity bucket   │
-      │                                                       │
-      ▼                                                       │
-ReserveOracle (on-chain) ◄────── custodian pushes balance ───┘
+TreasuryBondToken ───────────────────────────────────────────────┐
+      │                                                           │
+      │  checks before mint (via RiskManager):                    │
+      │  - reserve coverage: (liabilities + mintValue) × buffer   │
+      │    ≤ bondsValue[slot] + cashBuffer[slot]                   │
+      │  - slot not frozen, oracle data not stale                  │
+      │                                                           │
+      ▼                                                           │
+Custodian / SPV (off-chain)                                       │
+      │                                                           │
+      │  holds rolling pool of T-Bills per maturity bucket        │
+      │                                                           │
+      ▼                                                           │
+ReservesOracle (on-chain) ◄────── custodian pushes balance ───────┘
 ```
 
 #### Implementation on testnet (Sepolia)
 
-| Layer          | Production                               | Testnet (this protocol)                           |
-| -------------- | ---------------------------------------- | ------------------------------------------------- |
-| Custody        | Regulated SPV holds real T-Bills         | Simulated — no real assets                        |
-| Reserve feed   | Chainlink PoR `AggregatorV3Interface`    | `ReserveOracle.sol` (mock updater)                |
-| Reserve update | Chainlink node attests custodian wallet  | `custodian` address calls `updateReserves()`      |
-| Mint gate      | `require(porFeed.latestAnswer() >= ...)` | `require(reserveOracle.isReserveSufficient(...))` |
+| Layer          | Production                               | Testnet (this protocol)                              |
+| -------------- | ---------------------------------------- | ---------------------------------------------------- |
+| Custody        | Regulated SPV holds real T-Bills         | Simulated — no real assets                           |
+| Reserve feed   | Chainlink PoR `AggregatorV3Interface`    | `ReservesOracle.sol` (mock updater)                  |
+| Reserve update | Chainlink node attests custodian wallet  | `custodian` address calls `updateUsdValues()`        |
+| Mint gate      | Reserve coverage check via RiskManager   | `RiskManager._validateMintReserves()` with buffer    |
 
 ---
 
@@ -174,31 +212,31 @@ The protocol has three distinct fee mechanisms that together make it economicall
 #### Economic flow
 
 ```
-T-Bill gross yield (e.g. 4.50% annual)
+T-Bill gross yield (e.g. 4.00% annual)
         │
-        ├── management fee (e.g. 0.50%) → feeCollector
+        ├── management fee (20% of gross yield) → feeCollector
         │
-        └── net yield (e.g. 4.00%) → holder via claimYield()
+        └── net yield (80% of gross yield) → holder via claimYield()
 
-On mint:
-        mint fee (e.g. 0.10% of USDC deposited) → feeCollector
+On entry:
+        entry fee (0.2% of USDC deposited) → feeCollector
 
-On early redemption:
-        early redemption fee (e.g. 0.50% of payout) → feeCollector
+On early redemption (within penalty period):
+        early redemption fee (up to 5% of payout, decreasing linearly to 0) → feeCollector
 ```
 
 The protocol does not create yield — it **passes through** yield from real T-Bills, retaining a spread. This is identical to how Ondo Finance and other RWA protocols generate revenue.
 
-#### 1. Mint Fee (one-time, on deposit)
+#### 1. Entry Fee (one-time, on deposit)
 
-Charged at mint time as a percentage of the USDC deposited. Deducted before USDC reaches the treasury.
+Charged at `openNewPosition()` time as a percentage of the USDC deposited. Deducted before USDC reaches the treasury.
 
 ```solidity
-uint256 public constant MINT_FEE_BPS = 10; // 0.10%
+// PERCENTAGE_ENTRY_FEE = 0.2% (2 * PERCENTAGE_PRECISION / 10, in MAX_PERCENTAGE scale)
 
-uint256 fee = cost * MINT_FEE_BPS / 10000;
-paymentToken.transferFrom(to, feeCollector, fee);
-paymentToken.transferFrom(to, treasury, cost - fee);
+uint256 feeCollected = (_amount * C.PERCENTAGE_ENTRY_FEE) / C.MAX_PERCENTAGE;
+uint256 netAmount    = _amount - feeCollected;
+// netAmount goes to Treasury, feeCollected stays in Treasury fee accounting
 ```
 
 #### 2. Management Fee (continuous, on yield)
@@ -206,63 +244,62 @@ paymentToken.transferFrom(to, treasury, cost - fee);
 Deducted from the gross yield at the time of `claimYield()`. The holder receives net yield; the spread goes to `feeCollector`.
 
 ```solidity
-uint256 public constant MANAGEMENT_FEE_BPS = 50; // 0.50% annual
+// PERCENTAGE_YIELD_FEE = 20% of gross yield
 
-uint256 grossYield = bondOracle.getYield(slot);
-uint256 netYield = grossYield - MANAGEMENT_FEE_BPS;
-uint256 accrued = value * netYield * elapsed / (10000 * 365 days);
-uint256 feeAccrued = value * MANAGEMENT_FEE_BPS * elapsed / (10000 * 365 days);
+uint256 principalUsd  = YieldsMath.calculatePrincipalUsd(value, positionData.entryNAV, PAR);
+uint256 elapsedTime   = block.timestamp - positionData.lastClaimTimestamp;
+uint256 grossAccrued  = principalUsd * positionData.entryYield * elapsedTime
+                        / (365 days * PERCENTAGE_PRECISION);
 
-paymentToken.transferFrom(treasury, msg.sender, accrued);
-paymentToken.transferFrom(treasury, feeCollector, feeAccrued);
+uint256 managementFee = grossAccrued * C.PERCENTAGE_YIELD_FEE / C.MAX_PERCENTAGE;
+uint256 netPayout     = grossAccrued - managementFee;
+// netPayout → holder, managementFee → feeCollector via Treasury
 ```
 
-#### 3. Early Redemption Fee (conditional, on redeem before lock period)
+#### 3. Early Redemption Fee (conditional, on redeem before penalty period)
 
-Because each slot is a rolling pool with no fixed maturity, the protocol enforces a **lock period per slot** instead of a maturity date. Redeeming before the lock period expires incurs a penalty fee.
+Because each slot is a rolling pool with no fixed maturity, the protocol enforces a **penalty period per slot** instead of a maturity date. Redeeming before the penalty period expires incurs a fee that **decreases linearly to zero** as the penalty period elapses.
 
 ```solidity
-// Lock periods per slot
-uint256 public constant LOCK_PERIOD_2Y  = 30 days;
-uint256 public constant LOCK_PERIOD_5Y  = 90 days;
-uint256 public constant LOCK_PERIOD_10Y = 180 days;
-uint256 public constant LOCK_PERIOD_30Y = 365 days;
+// Penalty periods per slot
+uint256 public constant PENALTY_PERIOD_2Y  =  30 days;
+uint256 public constant PENALTY_PERIOD_5Y  =  60 days;
+uint256 public constant PENALTY_PERIOD_10Y =  90 days;
+uint256 public constant PENALTY_PERIOD_30Y = 180 days;
 
-uint256 public constant EARLY_REDEEM_FEE_BPS = 50; // 0.50%
+// PERCENTAGE_EXIT_FEE_MAX = 5% (maximum fee, applied at t=0)
+// Fee decreases linearly: at t=penaltyPeriod the fee reaches 0
 
-mapping(uint256 tokenId => uint256 mintTimestamp) public mintedAt;
+function _calculateEarlyRedeemFee(uint256 _mintTimestamp, uint256 _usdValue, uint256 _slot)
+    internal view returns (uint256 feeAmount)
+{
+    uint256 penaltyPeriod = _getPenaltyPeriod(_slot);
+    uint256 elapsedTime   = block.timestamp - _mintTimestamp;
 
-function redeem(uint256 tokenId, uint256 value) external {
-    uint256 payout = value * getNAV(tokenId) / PAR_VALUE;
-    uint256 elapsed = block.timestamp - mintedAt[tokenId];
+    if (elapsedTime >= penaltyPeriod) return 0; // no fee after penalty period
 
-    if (elapsed < slotLockPeriod(slotOf(tokenId))) {
-        uint256 fee = payout * EARLY_REDEEM_FEE_BPS / 10000;
-        payout -= fee;
-        paymentToken.transfer(feeCollector, fee);
-    }
-    // burn and pay out...
+    uint256 remainingTime      = penaltyPeriod - elapsedTime;
+    uint256 currentFeePercentage = (C.PERCENTAGE_EXIT_FEE_MAX * remainingTime) / penaltyPeriod;
+    feeAmount = (_usdValue * currentFeePercentage) / C.MAX_PERCENTAGE;
 }
 ```
 
-Lock periods are longer for longer-duration buckets, reflecting the illiquidity premium of longer-term fixed income — consistent with TradFi market conventions.
+Penalty periods are longer for longer-duration buckets, reflecting the illiquidity premium of longer-term fixed income — consistent with TradFi market conventions.
 
-#### mintedAt propagation on transferFrom
+#### mintTimestamp propagation on transferFrom
 
-When `transferFrom(uint256 fromTokenId, address to, uint256 value)` creates a new derived token, the new token inherits the `mintedAt` of the source token:
+When `transferFrom(uint256 fromTokenId, address to, uint256 value)` creates a new derived token, the new token inherits the `mintTimestamp` of the source token. This is handled inside `_beforeTransfer` → `_beforeValueTransfer`:
 
 ```solidity
-function transferFrom(
-    uint256 fromTokenId_,
-    address to_,
-    uint256 value_
-) public payable override returns (uint256 newTokenId) {
-    newTokenId = super.transferFrom(fromTokenId_, to_, value_);
-    mintedAt[newTokenId] = mintedAt[fromTokenId_];
-}
+s_fromIdToPositionData[_toTokenId] = PositionData({
+    entryYield:         fromPosData.entryYield,
+    entryNAV:           fromPosData.entryNAV,
+    mintTimestamp:      fromPosData.mintTimestamp,   // inherited — lock period cannot be reset
+    lastClaimTimestamp: block.timestamp              // reset: new token accrues from transfer moment
+});
 ```
 
-This ensures lock period enforcement is consistent across the full token lifecycle — a recipient cannot reset the lock period by receiving a transfer.
+Before the split, `_claimYield(fromTokenId)` is called to settle all accrued yield to the sender up to the transfer moment. The new token starts with zero accrued yield.
 
 ---
 
@@ -274,10 +311,10 @@ This protocol does **not** model individual bond instruments (specific CUSIP, co
 
 1. **Data availability.** FRED API provides one yield per maturity bucket. Per-issuance data requires Bloomberg or Refinitiv — not suitable for on-chain oracle pipelines.
 2. **Financial modeling level.** This protocol operates at **Level 2 — Risk Modeling** (yield curve exposure per duration bucket), not Level 1 (individual bond microstructure).
-3. **ERC-3525 slot/value model.** Tokens in the same slot are fungible. This maps naturally to pool shares: all "10Y pool shares" are fungible regardless of mint time.
+3. **ERC-3525 slot/value model.** Tokens in the same slot are fungible. This maps naturally to pool shares: all \"10Y pool shares\" are fungible regardless of mint time.
 4. **Simplicity and composability.** 4 fixed slots keep the system simple, gas-efficient, and easy to integrate with DeFi protocols.
 
-> **Interview-grade explanation:** "Each ERC-3525 slot represents shares in a rolling pool of T-Bills with similar duration, not a specific issuance. This allows the protocol to model interest rate risk per maturity bucket, preserve fungibility within each slot, and replicate the rolling portfolio model used by institutional RWA protocols like Ondo Finance."
+> **Interview-grade explanation:** \"Each ERC-3525 slot represents shares in a rolling pool of T-Bills with similar duration, not a specific issuance. This allows the protocol to model interest rate risk per maturity bucket, preserve fungibility within each slot, and replicate the rolling portfolio model used by institutional RWA protocols like Ondo Finance.\"
 
 ---
 
@@ -285,38 +322,50 @@ This protocol does **not** model individual bond instruments (specific CUSIP, co
 
 #### NAV — Modified Duration Model
 
-$$NAV = par \times \left[1 - D_{mod} \times (y_{current} - y_{entry})\right]$$
+When yields rise the NAV falls; when yields fall the NAV rises:
+
+```
+tassi saliti: NAV = PAR × (MAX_PERCENTAGE - D_mod × (y_current - y_entry) / PERCENTAGE_PRECISION) / MAX_PERCENTAGE
+tassi scesi:  NAV = PAR × (MAX_PERCENTAGE + D_mod × (y_entry - y_current) / PERCENTAGE_PRECISION) / MAX_PERCENTAGE
+```
+
+NAV is capped at 0 if the discount reaches or exceeds 100% — a mathematical safety guardrail that prevents underflow. In practice the RiskManager freezes the slot on `ExcessiveYieldShock` (>5% shock) before this level is reached.
 
 | Slot | Maturity | $D_{mod}$ | Yield +50bps → NAV change |
 | ---- | -------- | --------- | ------------------------- |
 | 1    | 2Y       | 1.9       | -0.95%                    |
 | 2    | 5Y       | 4.5       | -2.25%                    |
-| 3    | 10Y      | 8.7       | -4.35%                    |
-| 4    | 30Y      | 19.5      | -9.75%                    |
+| 3    | 10Y      | 8.5       | -4.25%                    |
+| 4    | 30Y      | 18        | -9.00%                    |
 
 #### Yield Accrual — `claimYield()`
 
-$$accrued = value \times \frac{netYield}{10000} \times \frac{elapsed}{365\ days}$$
+```
+grossAccrued = principalUsd × entryYield / PERCENTAGE_PRECISION × elapsed / 365 days
+netPayout    = grossAccrued × (1 - PERCENTAGE_YIELD_FEE / MAX_PERCENTAGE)
+```
 
-Where `netYield = grossYield - MANAGEMENT_FEE_BPS`. The management fee portion accrues to `feeCollector`.
+Where `principalUsd = token.value × entryNAV / PAR` (USD 18 decimals). The management fee portion accrues to `feeCollector`.
 
-#### USDC Settlement — Mint and Redeem
+#### USDC Settlement — Open and Close
 
-| Operation                | Price                    | Fee                                          |
-| ------------------------ | ------------------------ | -------------------------------------------- |
-| `mint(to, slot, value)`  | `value × NAV / par` USDC | Mint fee deducted from deposit               |
-| `redeem(tokenId, value)` | `value × NAV / par` USDC | Early redemption fee if within lock period   |
+| Operation                          | Price                            | Fee                                                    |
+| ---------------------------------- | -------------------------------- | ------------------------------------------------------ |
+| `openNewPosition(to, slot, usdc)`  | 1:1 USDC → USD via price feed   | Entry fee (0.2%) deducted from deposit                 |
+| `closePosition(tokenId)`           | `token.value × NAV / PAR` USDC  | Early redemption fee (0–5%) if within penalty period   |
 
 #### Risk Controls
 
-| Control              | Implementation                                                     |
-| -------------------- | ------------------------------------------------------------------ |
-| Proof of Reserve     | `reserveOracle.isReserveSufficient()` — blocks mint if underbacked |
-| Max supply per slot  | `maxSupplyPerSlot[slot]` — caps total exposure per maturity bucket |
-| Frozen wallets       | `frozenWallets[addr]` — blocks transfers from frozen addresses     |
-| Oracle freshness     | `isStale(slot)` — blocks operations if yield data > 72 hours old   |
-| Reserve freshness    | `reserveOracle.isStale()` — blocks mint if PoR data > 24 hours old |
-| Lock period          | `mintedAt[tokenId]` — early redemption fee if redeemed too early   |
+| Control                  | Implementation                                                                         |
+| ------------------------ | -------------------------------------------------------------------------------------- |
+| Reserve coverage         | `RiskManager._validateMintReserves()` — blocks mint if portfolio < liabilities × buffer |
+| Dynamic reserve buffer   | Increases buffer up to 1.5× during 2s10s yield curve inversion                        |
+| Slot freeze              | Anomalous yield or reserve data freezes the affected slot, leaving others operational  |
+| Oracle freshness         | `_checkSlotSafe()` — blocks mint/burn if yield or reserve oracle is stale              |
+| On-chain liquidity check | `_validateInstantLiquidity()` — blocks redeem if USDC in Treasury < payout required    |
+| Daily redeem limit       | `_validateRedeemRateLimit()` — caps daily USDC outflow per slot (anti bank-run)        |
+| Redemption window        | `_validateRedemptionWindow()` — restricts redemptions to SPV operational hours         |
+| Frozen wallets           | ERC-3643: blocks transfers from frozen addresses                                       |
 
 ---
 
@@ -333,29 +382,20 @@ Where `netYield = grossYield - MANAGEMENT_FEE_BPS`. The management fee portion a
 | `Identity`              | ONCHAINID  | Per-investor identity contract holding claims                |
 | `ClaimIssuer`           | ONCHAINID  | Signs and issues KYC claims                                  |
 
-Compliance is enforced directly in `_beforeValueTransfer()`:
-
-```solidity
-function _beforeValueTransfer(
-    address from, address to,
-    uint256, uint256, uint256 slot, uint256
-) internal override {
-    if (from == address(0)) return; // skip on mint
-    require(identityRegistry.isVerified(to), "Recipient not KYC verified");
-    require(!bondOracle.isStale(slot), "Oracle data stale");
-    require(!frozenWallets[from], "Sender wallet is frozen");
-}
-```
+Compliance is enforced in `_beforeValueTransfer()`, which delegates to `_beforeMint`, `_beforeBurn`, or `_beforeTransfer` depending on the operation. The ERC-3643 layer handles KYC checks, wallet freeze, and pause. The RiskManager layer handles oracle freshness and slot freeze.
 
 ---
 
 ### Oracle Architecture: Three Contracts, Separation of Concerns
 
-| Contract                | Role                                                               | Chainlink dependency? |
-| ----------------------- | ------------------------------------------------------------------ | --------------------- |
-| `BondOracle`            | Stores yields, exposes `getYield()` and `isStale()`                | ❌ None               |
-| `BondFunctionsConsumer` | Calls Chainlink Functions, writes to BondOracle                    | ✅ FunctionsClient    |
-| `ReserveOracle`         | Attests custodian reserve balance, exposes `isReserveSufficient()` | ❌ None (mock)        |
+| Contract                  | Role                                                                  | Chainlink dependency? |
+| ------------------------- | --------------------------------------------------------------------- | --------------------- |
+| `BondOracle`              | Stores yields, exposes `getAllYields()` and `isStale()`               | ❌ None               |
+| `BondFunctionsConsumer`   | Calls Chainlink Functions, writes to BondOracle                       | ✅ FunctionsClient    |
+| `ReservesOracle`          | Attests custodian reserve balances per slot                           | ❌ None (mock)        |
+| `ReservesFunctionsConsumer` | Calls Chainlink Functions, writes to ReservesOracle               | ✅ FunctionsClient    |
+
+RiskManager reads from both oracles **indirectly** via a validated cache (`s_lastValidYields`, `s_lastValidReserves`, `s_lastValidSlotMarketData`). Oracle data is never read directly during user transactions — it flows through the cache update functions (`updateYieldsValues`, `updateReserveValues`) triggered by Chainlink Automation.
 
 ---
 
@@ -363,11 +403,10 @@ function _beforeValueTransfer(
 
 | Library              | Remapping               | Purpose                                                       |
 | -------------------- | ----------------------- | ------------------------------------------------------------- |
-| OpenZeppelin         | `@openzeppelin/`        | Access control (Ownable)                                      |
-| Chainlink            | `@chainlink/`           | FunctionsClient, AutomationCompatible                         |
+| OpenZeppelin         | `@openzeppelin/`        | AccessControl, ReentrancyGuard, SafeERC20, SafeCast           |
+| Chainlink            | `@chainlink/`           | FunctionsClient, AutomationCompatible, AggregatorV3Interface  |
 | T-REX                | `@t-rex/`               | IdentityRegistry, ClaimTopicsRegistry, TrustedIssuersRegistry |
 | ONCHAINID            | `@onchain-id/solidity/` | Identity, ClaimIssuer                                         |
-| ERC-3525             | `@erc3525/`             | ERC3525 base contract                                         |
 | Forge Std            | `forge-std/`            | Test utilities                                                |
 
 ---
@@ -386,10 +425,10 @@ forge test
 
 ## Known Limitations
 
-- **No real custody:** `ReserveOracle` is a mock. In production, the reserve feed would come from a Chainlink PoR node attesting a real custodian wallet or SPV.
+- **No real custody:** `ReservesOracle` is a mock. In production, the reserve feed would come from a Chainlink PoR node attesting a real custodian wallet or SPV.
 - **No redemption-side PoR:** the current model gates minting on reserve sufficiency but does not re-check reserves on yield accrual payouts.
-- **Floating-rate carry:** `claimYield()` uses the current oracle yield at claim time, not a fixed coupon locked at mint. Real T-Bills have fixed yield to maturity.
-- **Lock period as maturity proxy:** the protocol uses slot-level lock periods instead of per-token maturity dates. This is consistent with the rolling pool model but does not replicate the fixed-maturity behavior of individual T-Bills.
+- **Floating-rate carry:** `claimYield()` uses the yield locked at mint time (`entryYield` from `PositionData`), not the current oracle yield. This is consistent with the fixed-carry model but differs from floating-rate instruments.
+- **Penalty period as maturity proxy:** the protocol uses slot-level penalty periods instead of per-token maturity dates. This is consistent with the rolling pool model but does not replicate the fixed-maturity behavior of individual T-Bills.
 - **No Proof of Reserve for yield oracle:** FRED data is fetched via Chainlink Functions DON but without cryptographic proof of data integrity. In production, multiple independent data sources provide this guarantee.
 
 ---
