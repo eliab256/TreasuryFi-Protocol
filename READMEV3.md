@@ -427,8 +427,6 @@ forge test
 
 - **No real custody:** `ReservesOracle` is a mock. In production, the reserve feed would come from a Chainlink PoR node attesting a real custodian wallet or SPV.
 - **No redemption-side PoR:** the current model gates minting on reserve sufficiency but does not re-check reserves on yield accrual payouts.
-- **Floating-rate carry:** `claimYield()` uses the yield locked at mint time (`entryYield` from `PositionData`), not the current oracle yield. This is consistent with the fixed-carry model but differs from floating-rate instruments.
-- **Penalty period as maturity proxy:** the protocol uses slot-level penalty periods instead of per-token maturity dates. This is consistent with the rolling pool model but does not replicate the fixed-maturity behavior of individual T-Bills.
 - **No Proof of Reserve for yield oracle:** FRED data is fetched via Chainlink Functions DON but without cryptographic proof of data integrity. In production, multiple independent data sources provide this guarantee.
 
 ---
