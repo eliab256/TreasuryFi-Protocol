@@ -399,6 +399,73 @@ RiskManager reads from both oracles **indirectly** via a validated cache (`s_las
 
 ---
 
+### Contract Architecture: Abstract Bases + Internal Functions + Access-Controlled Public Wrappers
+
+Three of the abstract base contracts inherited by `TreasuryBondToken` follow a common pattern: logic is implemented as `internal` functions in the base, then surfaced in `TreasuryBondToken` as `public`/`external` functions with the appropriate access controls.
+
+```
+Abstract base contract
+    └── _internalFunction(params) internal   ← logic here, no access control
+
+TreasuryBondToken (inherits base)
+    └── publicFunction(params) external onlyRole(SOME_ROLE) {
+            _internalFunction(params);        ← guarded wrapper
+        }
+```
+
+This pattern applies to `RiskManager`, `ERC3643`, and `UsdcUsdConverter`. It does **not** apply to the oracle or automation contracts, which are standalone deployments communicating via external calls.
+
+#### `RiskManager` → `TreasuryBondToken`
+
+`RiskManager` contains all risk control logic as `internal` functions. `TreasuryBondToken` exposes the admin entry points with `onlyRole`:
+
+| Internal (RiskManager) | Public wrapper (TreasuryBondToken) | Role |
+|---|---|---|
+| `_setSlotRiskParams()` | `setSlotRiskParams()` | `OWNER_ROLE` |
+| `_triggerYieldsUpkeep()` | `triggerYieldsUpkeep()` | `AUTOMATION_TRIGGERER_ROLE` |
+| `_triggerReservesUpkeep()` | `triggerReservesUpkeep()` | `AUTOMATION_TRIGGERER_ROLE` |
+| `_updateYieldsValues()` | `updateYieldsValues()` | `UPDATE_RISK_MANAGER_VALUES_ROLE` |
+| `_updateReservesValues()` | `updateReserveValues()` | `UPDATE_RISK_MANAGER_VALUES_ROLE` |
+| `_setSlotFrozenOnMainContract()` | `setSlotFrozen()` | `OWNER_ROLE` |
+| `_assertSolvency()` | `assertSolvency()` | *(public view, no role)* |
+
+The lifecycle hooks (`_riskManagerBeforeMint`, `_riskManagerBeforeBurn`, `_riskManagerBeforeTransferLiquidity`) remain fully internal — called from `TreasuryBondToken`'s `_beforeMint`/`_beforeBurn`/`_beforeTransfer` and never exposed.
+
+#### `ERC3643` → `TreasuryBondToken`
+
+`ERC3643` implements T-REX compliance logic as `internal` functions. `TreasuryBondToken` exposes the operator entry points with their respective T-REX roles:
+
+| Internal (ERC3643) | Public wrapper (TreasuryBondToken) | Role |
+|---|---|---|
+| `_pause()` / `_unpause()` | `pause()` / `unpause()` | `PAUSER_ROLE` |
+| `_setAddressFrozen()` | `setAddressFrozen()`, `batchSetAddressFrozen()` | `FREEZER_ROLE` |
+| `_freezePartialToken()` / `_unfreezePartialToken()` | `freezePartialTokens()`, `unfreezePartialTokens()`, batch variants | `FREEZER_ROLE` |
+| `_recoveryAddress()` | `recoveryAddress()` | `RECOVERY_ROLE` |
+| `_executeRecoveryTransfer()` | `_executeRecoveryTransferExternal()` | `RECOVERY_ROLE` |
+
+`forceTransfer` is defined directly in `TreasuryBondToken` (not a wrapper of an ERC3643 internal) because it additionally settles yield and clears frozen value before executing the transfer.
+
+#### `UsdcUsdConverter` → `TreasuryBondToken`
+
+`UsdcUsdConverter` provides USDC/USD conversion utilities as `internal` functions. The conversion functions (`_convertUsdcToUsd18`, `_convertUsd18ToUsdc`, etc.) are used **purely internally** by `TreasuryBondToken` — they are never exposed publicly. Only the state getters surface as `external view` functions, without a role guard since they are read-only:
+
+| Internal (UsdcUsdConverter) | Public wrapper (TreasuryBondToken) | Role |
+|---|---|---|
+| `_getUsdc()` | `getUsdc()` | *(no role — view)* |
+| `_getUsdUsdcPriceFeed()` | `getUsdcPriceFeed()` | *(no role — view)* |
+| *(immutable)* | `getUsdcDecimals()` | *(no role — view)* |
+| *(immutable)* | `getUsdcPriceFeedDecimals()` | *(no role — view)* |
+
+#### Why this design
+
+1. **Single access-control surface.** All `onlyRole` guards live in `TreasuryBondToken`. Base contracts contain zero role checks — they cannot be misconfigured independently.
+2. **Separation of concerns.** Risk logic, compliance logic, and conversion utilities are isolated in their own modules. `TreasuryBondToken` is the integration layer, not the logic layer.
+3. **Testability.** Internal functions in abstract contracts can be tested by deploying a minimal concrete wrapper that inherits only the module under test, without needing the full `TreasuryBondToken` setup.
+4. **No proxy overhead.** All base contracts are inherited directly — the entire system compiles into a single bytecode deployment. No `delegatecall`, no proxy pattern, no storage slot collision risk.
+5. **Solidity enforces it.** Abstract contracts cannot be deployed directly, making the inheritance boundary explicit and compile-time guaranteed.
+
+---
+
 ## Dependencies
 
 | Library              | Remapping               | Purpose                                                       |
