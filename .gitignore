@@ -9,6 +9,7 @@ out/
 
 # Docs
 docs/
+ignore/
 
 #library files
 lib/

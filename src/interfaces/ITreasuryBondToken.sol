@@ -48,7 +48,6 @@ interface ITreasuryBondToken is IERC3643 , IERC3525  , IRiskManager, IUsdcUsdCon
     error TreasuryBondToken__InvalidTokenOwner();
     error TreasuryBondToken__ForcedTransferFailed();
 
-
     // --- Admin ---
 
     /**
