@@ -3,6 +3,8 @@ pragma solidity ^0.8.0;
 
 import {ERC3525} from "./ERC3525.sol";
 import {ERC3643} from "./ERC3643.sol";
+import {IERC3525} from "../interfaces/IERC3525.sol";
+import {IERC721} from "@solvprotocol/erc-3525/IERC721.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {IModularCompliance} from "@t-rex/compliance/modular/IModularCompliance.sol";
 import {IIdentityRegistry} from "@t-rex/registry/interface/IIdentityRegistry.sol";
@@ -125,7 +127,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
 
     function supportsInterface(
         bytes4 interfaceId
-    ) public view override(ERC3525, AccessControl) returns (bool) {
+    ) public view override(ERC3525, AccessControl, IERC165) returns (bool) {
          return ERC3525.supportsInterface(interfaceId) || AccessControl.supportsInterface(interfaceId);
     }
 
@@ -274,7 +276,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         uint256 _fromTokenId,
         address _to,
         uint256 _value
-    ) public payable override etherNotAccepted  returns (uint256 newTokenId) {
+    ) public payable override(ERC3525, IERC3525) etherNotAccepted  returns (uint256 newTokenId) {
         newTokenId = super.transferFrom(_fromTokenId, _to, _value);
         if(!_checkOnERC721Received(ownerOf(_fromTokenId), _to, newTokenId, "")){
             revert ERC3525__TransferToNonERC721ReceiverImplementer();
@@ -282,7 +284,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
     }
 
     /// @dev Inherit from ITreasuryBondToken. See interface for details.
-    function transferFrom(uint256, uint256, uint256) public payable override {
+    function transferFrom(uint256, uint256, uint256) public payable override(ERC3525, IERC3525) {
         revert TreasuryBondToken__FunctionDisabled();
     }
 
@@ -291,7 +293,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         address _from,
         address _to,
         uint256 _tokenId
-    ) public payable override etherNotAccepted nonReentrant{
+    ) public payable override(ERC3525, IERC721) etherNotAccepted nonReentrant{
         super.transferFrom(_from, _to, _tokenId);
         if(!_checkOnERC721Received(_from, _to, _tokenId, "")){
             revert ERC3525__TransferToNonERC721ReceiverImplementer();
@@ -304,7 +306,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         address _to,
         uint256 _tokenId,
         bytes memory _data
-    ) public payable override etherNotAccepted  {
+    ) public payable override(ERC3525, IERC721) etherNotAccepted  {
         super.safeTransferFrom(_from, _to, _tokenId, _data);
     }
 
@@ -313,7 +315,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         address _from,
         address _to,
         uint256 _tokenId
-    ) public payable override etherNotAccepted  {
+    ) public payable override(ERC3525, IERC721) etherNotAccepted  {
         super.safeTransferFrom(_from, _to, _tokenId, "");
     }
 
@@ -700,16 +702,16 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
 ////////////////////////////////////////////////////////////////////  
 
     /// @dev Inherit from ITreasuryBondToken. See interface for details.
-    function ownerOf(uint256 tokenId) public view override returns (address) {
+    function ownerOf(uint256 tokenId) public view override(ERC3525, IERC721) returns (address) {
         return super.ownerOf(tokenId);
     }
 
     /// @dev Inherit from ITreasuryBondToken. See interface for details.
-    function balanceOf(uint256 tokenId) public view override(ERC3643, ERC3525) returns (uint256) {
+    function balanceOf(uint256 tokenId) public view override(ERC3643, ERC3525, IERC3525) returns (uint256) {
         return super.balanceOf(tokenId);
     }
     /// @dev Inherit from ITreasuryBondToken. See interface for details.
-    function balanceOf(address owner) public view override(ERC3643, ERC3525) returns (uint256) {
+    function balanceOf(address owner) public view override(ERC3643, ERC3525, IERC721) returns (uint256) {
         return super.balanceOf(owner);
     }
 
@@ -787,37 +789,37 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
     }
 
     /// @dev Inherit from ITreasuryBondToken. See interface for details.
-    function getBondAutomation() external view returns (address) {
+    function getBondAutomation() external view override returns (address) {
         return address(i_yieldsAutomation);
     }
 
     /// @dev Inherit from ITreasuryBondToken. See interface for details.
-    function getReservesAutomation() external view returns (address) {
+    function getReservesAutomation() external view override returns (address) {
         return address(i_reservesAutomation);
     }
 
     /// @dev Inherit from ITreasuryBondToken. See interface for details.
-    function getBondOracle() external view returns (address) {
+    function getBondOracle() external view override returns (address) {
         return address(i_yieldsOracle);
     }
 
     /// @dev Inherit from ITreasuryBondToken. See interface for details.
-    function getReservesOracle() external view returns (address) {
+    function getReservesOracle() external view override returns (address) {
         return address(i_reservesOracle);
     }
 
     /// @dev Inherit from ITreasuryBondToken. See interface for details.
-    function getTreasury() external view returns (address) {
+    function getTreasury() external view override returns (address) {
         return address(i_treasury);
     }
 
     /// @dev Inherit from ITreasuryBondToken. See interface for details.
-    function getInterval() external view returns (uint256) {
+    function getInterval() external view override returns (uint256) {
         return i_interval;
     }
 
     /// @dev Inherit from ITreasuryBondToken. See interface for details.
-    function getGracePeriod() external view returns (uint256) {
+    function getGracePeriod() external view override returns (uint256) {
         return i_gracePeriod;
     }
 
@@ -868,7 +870,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
     }
 
     // /// @dev Inherit from ITreasuryBondToken. See interface for details.
-    function valueDecimals() public view override(ERC3643, ERC3525) returns (uint8) {
+    function valueDecimals() public view override(ERC3643, ERC3525, IERC3525) returns (uint8) {
         return i_decimals;
     }
 

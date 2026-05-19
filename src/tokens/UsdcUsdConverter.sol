@@ -1,15 +1,13 @@
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 import {TokenConstants as C} from "./TokenConstants.sol";
+import {IUsdcUsdConverter} from "../interfaces/IUsdcUsdConverter.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
-abstract contract UsdcUsdConverter {
-    error UsdcUsdConverter__UsdcPriceFeedNotAvailable();
-    error UsdcUsdConverter__UsdcPriceFeedRoundStale();
-    error UsdcUsdConverter__UsdcPriceIsStale();
+abstract contract UsdcUsdConverter is IUsdcUsdConverter {
 
     IERC20 private immutable i_usdc;
     AggregatorV3Interface private immutable i_usdcPriceFeed;

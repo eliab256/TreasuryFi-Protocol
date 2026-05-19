@@ -5,7 +5,7 @@ import {Base} from "./Base.t.sol";
 import {OracleDataExamples} from "./OracleDataExamples.sol";
 import {TokenConstants as C} from "../../../src/tokens/TokenConstants.sol";
 import {ReservesResponse} from "../../../src/types.sol";
-import {RiskManager} from "../../../src/tokens/RiskManager.sol";
+import {IRiskManager} from "../../../src/interfaces/IRiskManager.sol";
 import {Vm} from "forge-std/Vm.sol";
 
 import {console2} from "forge-std/console2.sol";
@@ -145,7 +145,7 @@ contract CoreLifeCycleTest is Base {
         for (uint256 i = 0; i < logs.length; i++) {
             if (logs[i].emitter != address(treasuryBondToken)) continue;
 
-            if (logs[i].topics[0] == RiskManager.InvalidYield.selector) {
+            if (logs[i].topics[0] == IRiskManager.InvalidYield.selector) {
                 uint256 slot = uint256(logs[i].topics[1]);
                 (uint256 yield) = abi.decode(logs[i].data, (uint256));
                 if (slot == C.SLOT_30Y) {
@@ -154,7 +154,7 @@ contract CoreLifeCycleTest is Base {
                 }
             }
 
-            if (logs[i].topics[0] == RiskManager.SlotFrozen.selector) {
+            if (logs[i].topics[0] == IRiskManager.SlotFrozen.selector) {
                 uint256 slot = uint256(logs[i].topics[1]);
                 if (slot == C.SLOT_30Y) {
                     slotFrozenFound = true;
@@ -180,7 +180,7 @@ contract CoreLifeCycleTest is Base {
         for (uint256 i = 0; i < logs.length; i++) {
             if (logs[i].emitter != address(treasuryBondToken)) continue;
 
-            if (logs[i].topics[0] == RiskManager.ExcessiveReserveShock.selector) {
+            if (logs[i].topics[0] == IRiskManager.ExcessiveReserveShock.selector) {
                 uint256 slot = uint256(logs[i].topics[1]);
                 if (slot == C.SLOT_10Y) {
                     (uint256 shock) = abi.decode(logs[i].data, (uint256));
@@ -189,7 +189,7 @@ contract CoreLifeCycleTest is Base {
                 }
             }
 
-            if (logs[i].topics[0] == RiskManager.SlotFrozen.selector) {
+            if (logs[i].topics[0] == IRiskManager.SlotFrozen.selector) {
                 uint256 slot = uint256(logs[i].topics[1]);
                 if (slot == C.SLOT_10Y) {
                     slotFrozenFound = true;
@@ -212,7 +212,7 @@ contract CoreLifeCycleTest is Base {
         uint256 slot = C.SLOT_10Y;
         uint256 totalDeposit = 1000 * 1e6; // 1000 USDC
         vm.prank(USER_1);
-        vm.expectRevert(abi.encodeWithSelector(RiskManager.RiskManager__SlotFrozen.selector, slot));
+        vm.expectRevert(abi.encodeWithSelector(IRiskManager.RiskManager__SlotFrozen.selector, slot));
         treasuryBondToken.openNewPosition(USER_1, slot, totalDeposit);
     }
 

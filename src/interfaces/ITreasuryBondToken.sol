@@ -1,11 +1,12 @@
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
-import {PositionData} from "../types.sol";
+import {PositionData, SlotRiskParams} from "../types.sol";
 import {IERC3525} from "./IERC3525.sol";
 import {IERC3643} from "./IERC3643.sol";
+import {IRiskManager} from "./IRiskManager.sol";
+import {IUsdcUsdConverter} from "./IUsdcUsdConverter.sol";
 
-// @audit-issue  verificare ereditartietà della interface
-interface ITreasuryBondToken is IERC3643 /*, IERC3525 */ {
+interface ITreasuryBondToken is IERC3643 , IERC3525  , IRiskManager, IUsdcUsdConverter {
     // ------ Events ------
     event PositionOpened(
         address indexed owner,
@@ -48,6 +49,21 @@ interface ITreasuryBondToken is IERC3643 /*, IERC3525 */ {
     error TreasuryBondToken__ForcedTransferFailed();
 
 
+    // --- Admin ---
+
+    /**
+     * @notice Grants UPDATE_RISK_MANAGER_VALUES_ROLE to the given automation contract.
+     * @param _updateRiskManagerAutomation The address of the automation contract.
+     */
+    function setUpdateRiskManagerAutomation(address _updateRiskManagerAutomation) external;
+
+    /**
+     * @notice Sets the risk parameters for a given slot.
+     * @param _slot The slot to configure.
+     * @param _params The risk parameters to apply.
+     */
+    function setSlotRiskParams(uint256 _slot, SlotRiskParams memory _params) external;
+
     // --- RiskManager ---
 
     /**
@@ -81,25 +97,41 @@ interface ITreasuryBondToken is IERC3643 /*, IERC3525 */ {
     function triggerYieldsUpkeep() external;
 
     // --- Positions ---
+
+    /**
+     * @notice Opens a new position by minting a new token.
+     * @param _mintTo The address to mint the new token to.
+     * @param _slot The slot to associate with the new position.
+     * @param _value The value to deposit for the new position in USDC.
+     * @return newTokenId The ID of the newly minted token.
+     */
     function openNewPosition(address _mintTo, uint256 _slot, uint256 _value) external returns(uint256 newTokenId);
+    
+    /**
+     * @notice Closes an entire existing position by burning the token and paying out USDC.
+     * @param _tokenId The ID of the token representing the position to close.
+     */
     function closePosition(uint256 _tokenId) external;
+
+    /**
+     * @notice Closes a partial position by burning a specified amount of the token and paying out USDC.
+     * @param _tokenId The ID of the token representing the position to close.
+     * @param _valueToBurn The amount of the token to burn.
+     */
     function closePartialPosition(uint256 _tokenId, uint256 _valueToBurn) external;
+
+    /**
+     * @notice Claims the accrued yield for a given position.
+     * @param _tokenId The ID of the token representing the position.
+     */
     function claimYield(uint256 _tokenId) external;
 
     // --- ERC3525/ERC721 ---
-    // function ownerOf(uint256 tokenId) external view returns (address);
-    // function balanceOf(uint256 tokenId) external view returns (uint256);
-    // function balanceOf(address owner) external view returns (uint256);
-    // function transferFrom(uint256 _fromTokenId, address _to, uint256 _value) external payable returns (uint256);
-
     /**
      * @notice Disabled function to prevent transfers between tokens.
      * @dev This function is intentionally disabled to enforce the non-transferable nature of the tokens.
      */
     // function transferFrom(uint256, uint256, uint256) external payable;
-    // function transferFrom(address _from, address _to, uint256 _tokenId) external payable;
-    // function safeTransferFrom(address _from, address _to, uint256 _tokenId, bytes memory _data) external payable;
-    // function safeTransferFrom(address _from, address _to, uint256 _tokenId) external payable;
 
     // --- Getters ---
     function getTotalLiabilitiesPerSlot(uint256 _slot) external view returns (uint256);
@@ -111,7 +143,7 @@ interface ITreasuryBondToken is IERC3643 /*, IERC3525 */ {
      *      1. Retrieves position data (entryYield, lastClaimTimestamp)
      *      2. Calculates principal in USD based on token balance and entryNAV
      *      3. Calculates time elapsed since last claim
-     *      4. Computes gross accrued yield: principal * yield * elapsed / (365 days * PERCENTAGE_PRECISION)
+     *      4. Computes gross accrued yield: principal * yield * elapsed / (365 days * MAX_PERCENTAGE)
      *      5. Deducts management fee from gross accrued
      *      6. Converts net yield from USD (18 decimals) to USDC (6 decimals)
      * @param _tokenId The ERC-3525 token ID representing the position.
@@ -122,25 +154,7 @@ interface ITreasuryBondToken is IERC3643 /*, IERC3525 */ {
     function assertSolvency() external view;
     function getNextRedemptionWindow(uint256 _slot) external view returns (uint256 nextWindowOpen, uint256 windowDuration);
 
-    // --- RiskManager contract references ---
-    function getBondAutomation() external view returns (address);
-    function getReservesAutomation() external view returns (address);
-    function getBondOracle() external view returns (address);
-    function getReservesOracle() external view returns (address);
-    function getTreasury() external view returns (address);
-    function getInterval() external view returns (uint256);
-    function getGracePeriod() external view returns (uint256);
-
-    // --- UsdcUsdConverter references ---
-    function getUsdc() external view returns (address);
-    function getUsdcPriceFeed() external view returns (address);
-    function getUsdcDecimals() external view returns (uint8);
-    function getUsdcPriceFeedDecimals() external view returns (uint8);
-    // function name() external view returns (string memory);
-    // function symbol() external view returns (string memory);
-    // function valueDecimals() external view returns (uint8);
-
-    /**
+    /** 
      * @notice Forces the transfer of a token from one wallet to another on behalf of a regulatory authority.
      * @dev Bypasses standard compliance checks (frozen sender/receiver, paused state).
      *      The receiver must still be a verified identity in the IdentityRegistry.

@@ -38,7 +38,6 @@ interface IERC3525 is IERC165, IERC721 {
     event ContractChecked(address indexed contractAddress, bool supportsInterface, bytes4 interfaceId);
 
 
-
     /**
      * @dev MUST emit when value of a token is transferred to another token with the same slot,
      *  including zero value transfers (_value == 0) as well as transfers when tokens are created
