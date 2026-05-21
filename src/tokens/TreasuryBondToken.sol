@@ -175,14 +175,16 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         }
         // 1. Calculate entry fees and net amount to invest
         (uint256 netAmount, uint256 feeCollected) = _calculateEntryFees(_value);
-        // 2. TransferFrom caller di usdc _value to treasury contract
-        // Pass netAmount so Treasury transfers netAmount + feeCollected = _value total from the user.
-        i_treasury.depositUsdcFromOpenNewPosition(netAmount, msg.sender, _slot, feeCollected);
-        // 3.  convert net amount from usdc to usd with std decimals (18)
+        
+        // 2.  convert net amount from usdc to usd with std decimals (18)
         uint256 netAmountInUsd = _convertUsdcToUsd18(netAmount);
 
-        // 4. call _mint to: checks ERC3643, checks RiskManager, checks ERc3525 accounting, 
+        // 3. call _mint to: checks ERC3643, checks RiskManager, checks ERc3525 accounting, 
         newTokenId = _mint(_mintTo, _slot, netAmountInUsd);
+
+        // 4. TransferFrom caller di usdc _value to treasury contract
+        // Pass netAmount so Treasury transfers netAmount + feeCollected = _value total from the user.
+        i_treasury.depositUsdcFromOpenNewPosition(netAmount, msg.sender, _slot, feeCollected);
         
         // 5. emit event newPositionOpened
         emit PositionOpened(_mintTo, newTokenId, _slot, _value, netAmountInUsd, C.PAR);
