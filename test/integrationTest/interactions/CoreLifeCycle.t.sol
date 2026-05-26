@@ -141,11 +141,13 @@ contract CoreLifeCycleTest is Base {
 
         bool invalidYieldFound;
         bool slotFrozenFound;
+        bytes32 invalidYieldSig = keccak256("InvalidYield(uint256,uint256)");
+        bytes32 slotFrozenSig = keccak256("SlotFrozen(uint256)");
 
         for (uint256 i = 0; i < logs.length; i++) {
             if (logs[i].emitter != address(treasuryBondToken)) continue;
 
-            if (logs[i].topics[0] == IRiskManager.InvalidYield.selector) {
+            if (logs[i].topics[0] == invalidYieldSig) {
                 uint256 slot = uint256(logs[i].topics[1]);
                 (uint256 yield) = abi.decode(logs[i].data, (uint256));
                 if (slot == C.SLOT_30Y) {
@@ -154,7 +156,7 @@ contract CoreLifeCycleTest is Base {
                 }
             }
 
-            if (logs[i].topics[0] == IRiskManager.SlotFrozen.selector) {
+            if (logs[i].topics[0] == slotFrozenSig) {
                 uint256 slot = uint256(logs[i].topics[1]);
                 if (slot == C.SLOT_30Y) {
                     slotFrozenFound = true;
@@ -176,11 +178,13 @@ contract CoreLifeCycleTest is Base {
 
         bool excessiveReserveShockFound;
         bool slotFrozenFound;
+        bytes32 excessiveReserveShockSig = keccak256("ExcessiveReserveShock(uint256,uint256)");
+        bytes32 slotFrozenSig = keccak256("SlotFrozen(uint256)");
 
         for (uint256 i = 0; i < logs.length; i++) {
             if (logs[i].emitter != address(treasuryBondToken)) continue;
 
-            if (logs[i].topics[0] == IRiskManager.ExcessiveReserveShock.selector) {
+            if (logs[i].topics[0] == excessiveReserveShockSig) {
                 uint256 slot = uint256(logs[i].topics[1]);
                 if (slot == C.SLOT_10Y) {
                     (uint256 shock) = abi.decode(logs[i].data, (uint256));
@@ -189,7 +193,7 @@ contract CoreLifeCycleTest is Base {
                 }
             }
 
-            if (logs[i].topics[0] == IRiskManager.SlotFrozen.selector) {
+            if (logs[i].topics[0] == slotFrozenSig) {
                 uint256 slot = uint256(logs[i].topics[1]);
                 if (slot == C.SLOT_10Y) {
                     slotFrozenFound = true;

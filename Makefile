@@ -38,7 +38,7 @@ storage:
 
 # Usage: make coverage  (shows coverage only for src/ and script/ files)
 coverage:
-	@forge coverage --report summary 2>&1 | grep -E '(File|^\| src/|^\| script/|^Total)'
+	@FOUNDRY_PROFILE=classic forge coverage --report summary
 
 # note: needs lcov installed — sudo apt install lcov
 coverage-report:

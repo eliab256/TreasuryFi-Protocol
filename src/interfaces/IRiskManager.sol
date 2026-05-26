@@ -4,8 +4,8 @@ pragma solidity ^0.8.0;
 interface IRiskManager {
 
     // --- Errors ---
-    error RiskManager__InvalidYield(uint256 slot, uint256 yield);
-    error RiskManager__ExcessiveYieldShock(uint256 slot, uint256 shock);
+    error RiskManager__InvalidYield(uint256  slot, uint256 yield);
+    error RiskManager__ExcessiveYieldShock(uint256  slot, uint256 shock);
     error RiskManager__ZeroAddress();
     error RiskManager__AutomationGracePeriodNotElapsed();
     error RiskManager__SlotAlreadyFrozen(uint256 slot);

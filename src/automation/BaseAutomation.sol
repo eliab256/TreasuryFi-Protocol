@@ -36,6 +36,7 @@ abstract contract BaseAutomation is IBaseAutomation, AccessControl {
             revert BaseAutomation__ChainlinkForwarderAddressAlreadySet();
         }
         s_chainlinkForwarder = _chainlinkForwarder;
+        _grantRole(AUTOMATION_ROLE, _chainlinkForwarder);
     }
 
     /// @dev Inherited from IBaseAutomation. See interface for details.

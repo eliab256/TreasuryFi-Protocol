@@ -8,14 +8,10 @@ import {MockReservesFunctionsConsumer} from "../../mocks/MockReservesFunctionsCo
 
 
 abstract contract BaseTest is Test {
-    // ─── Roles ────────────────────────────────────────────────────────────────
-    bytes32 internal constant DEFAULT_ADMIN_ROLE  = bytes32(0);
-    bytes32 internal constant AUTOMATION_ADMIN_ROLE = keccak256("AUTOMATION_ADMIN_ROLE");
 
-    // ─── Accounts (set in setUp to avoid constant address collisions) ─────────
-    address internal ADMIN;
-    address internal NON_ADMIN;
-    address internal CHAINLINK_FORWARDER;
+    address internal ADMIN   = makeAddr("admin");
+    address internal NON_ADMIN  = makeAddr("nonAdmin");
+    address internal CHAINLINK_FORWARDER = makeAddr("chainlinkForwarder");
 
     // ─── Protocol constants (must mirror the production values) ───────────────
     uint256 internal constant INTERVAL     = 1 days;   // passed to constructors
@@ -26,23 +22,7 @@ abstract contract BaseTest is Test {
     MockBondFunctionsConsumer    internal mockBondConsumer;
     MockReservesFunctionsConsumer internal mockReservesConsumer;
 
-    // ─── Events (mirrors of IBaseAutomation – needed for vm.expectEmit) ──────
-    event ManualUpkeepExecuted(address indexed caller, uint256 indexed timestamp);
-
-    // ─── BaseAutomation custom errors (mirror of IBaseAutomation) ────────────
-    error BaseAutomation__ChainlinkForwarderAddressAlreadySet();
-    error BaseAutomation__ChainlinkUpkeepIdAlreadySet();
-    error BaseAutomation__UpkeepNotNeeded();
-    error BaseAutomation__OnlyChainlinkAutomation();
-    error BaseAutomation__OnlyChainlinkAutomationOrOwner();
-
-    // ─── Setup ────────────────────────────────────────────────────────────────
-
     function setUp() public virtual {
-        ADMIN              = makeAddr("admin");
-        NON_ADMIN          = makeAddr("nonAdmin");
-        CHAINLINK_FORWARDER = makeAddr("chainlinkForwarder");
-
         mockBondConsumer    = new MockBondFunctionsConsumer();
         mockReservesConsumer = new MockReservesFunctionsConsumer();
     }

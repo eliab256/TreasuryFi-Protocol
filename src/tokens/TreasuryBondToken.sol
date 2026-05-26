@@ -762,7 +762,7 @@ contract TreasuryBondToken is ITreasuryBondToken, ERC3643, ERC3525, RiskManager,
         
         // 2. Get balance and slot
         uint256 value = balanceOf(_tokenId);
-        uint256 slot = _slotOf(_tokenId);
+        //uint256 slot = _slotOf(_tokenId);
         
         // 3. Calculate principal in USD (18 decimals)
         uint256 principalUsd = YieldsMath.calculatePrincipalUsd(value, posData.entryNAV, C.PAR);
