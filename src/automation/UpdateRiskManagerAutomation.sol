@@ -78,7 +78,11 @@ import {ITreasuryBondToken} from "../interfaces/ITreasuryBondToken.sol";
 
         bool yieldsUpdateNeeded = yieldsTimestamp > s_lastYieldsUpdate;
         bool reservesUpdateNeeded = reservesTimestamp > s_lastReserveUpdate;
+
+        // If only one of them needs an update, we still want to perform upkeep to update that one and avoid unnecessary delays. 
         upkeepNeeded = yieldsUpdateNeeded || reservesUpdateNeeded;
+
+        // The performData will indicate which one(s) need updating.
         performData = abi.encode(yieldsUpdateNeeded, reservesUpdateNeeded);
         return (upkeepNeeded, performData);
     }
