@@ -2,7 +2,7 @@
 pragma solidity ^0.8.0;
 
 import {Base} from "./Base.t.sol";
-import {OracleDataExamples} from "./OracleDataExamples.sol";
+import {OracleDataExamples} from "../../OracleDataExamples.sol";
 import {TokenConstants as C} from "../../../src/tokens/TokenConstants.sol";
 import {ReservesResponse} from "../../../src/types.sol";
 import {IRiskManager} from "../../../src/interfaces/IRiskManager.sol";

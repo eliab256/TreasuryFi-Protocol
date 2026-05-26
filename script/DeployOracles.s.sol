@@ -130,8 +130,8 @@ contract DeployOracles is Script {
         console.log("Upkeep ID:", bondAutomation.getUpkeepId());
 
         // Get forwarder from config and set in automation contracts
-        address bondForwarder = helperConfig.getForwarderFromUpkeepId(bondUpkeepId);
-        address reservesForwarder = helperConfig.getForwarderFromUpkeepId(reservesUpkeepId);
+        bondForwarder = helperConfig.getForwarderFromUpkeepId(bondUpkeepId);
+        reservesForwarder = helperConfig.getForwarderFromUpkeepId(reservesUpkeepId);
         
         vm.broadcast(config.deployer);
         bondAutomation.setChainlinkForwarder(bondForwarder);

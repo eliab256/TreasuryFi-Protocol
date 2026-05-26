@@ -17,7 +17,7 @@ import {MockERC20} from "../../mocks/MockERC20.sol";
 import {MockV3Aggregator} from "../../mocks/MockV3Aggregator.sol";
 import {MockFunctionsRouter} from "../../mocks/MockFunctionsRouter.sol";
 import {BondYieldsResponse, ReservesResponse, SlotRiskParams} from "../../../src/types.sol";
-import {OracleDataExamples} from "./OracleDataExamples.sol";
+import {OracleDataExamples} from "../../OracleDataExamples.sol";
 import {TokenConstants as C} from "../../../src/tokens/TokenConstants.sol";
 
 contract Base is Test {
