@@ -12,8 +12,7 @@ contract BondFunctionsConsumer is
     FunctionsClient,
     AccessControl
 {
-    error BondFunctionsConsumer__InvalidAddress();
-    error BondFunctionsConsumer__InvalidResponseLength();
+
     using FunctionsRequest for FunctionsRequest.Request;
 
     /// @dev BondAutomation (chainlink automation + manual trigger from admin if grace pariod passed)

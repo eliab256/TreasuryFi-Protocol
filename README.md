@@ -486,6 +486,8 @@ The lifecycle hooks (`_riskManagerBeforeMint`, `_riskManagerBeforeBurn`, `_riskM
 
 ## Getting Started
 
+> **Recommended:** Install the [`solx`](https://github.com/NomicFoundation/solx) compiler to avoid `Stack Too Deep` errors caused by the complex multiple inheritance in this project. Once downloaded, set the path in `foundry.toml` (`solc = "/path/to/solx"`). Alternatively, use the `classic` profile which falls back to `solc_version = "0.8.20"` with `via_ir = true`.
+
 ```bash
 git clone https://github.com/<your-username>/TreasuryFi-Protocol.git
 cd TreasuryFi-Protocol

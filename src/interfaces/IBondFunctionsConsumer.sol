@@ -8,6 +8,8 @@ interface IBondFunctionsConsumer {
     error BondFunctionsConsumer__InvalidSubscriptionId();
     error BondFunctionsConsumer__SubscriptionIdAlreadySet();
     error BondFunctionsConsumer__ZeroAddress();
+    error BondFunctionsConsumer__InvalidAddress();
+    error BondFunctionsConsumer__InvalidResponseLength();
 
     // Events
     event SubscriptionIdSet(uint64 indexed subscriptionId);
