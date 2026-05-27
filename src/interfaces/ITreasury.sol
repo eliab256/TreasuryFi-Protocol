@@ -4,6 +4,7 @@ pragma solidity ^0.8.0;
 interface ITreasury {
     // ------ Errors ------
     error Treasury__ZeroAddress();
+    error Treasury__TokenContractAlreadySet();
     error Treasury__AmountExceedsTotalFeesToBeCollected();
     error Treasury__AmountExceedsFeesToBeCollected();
     error Treasury__InsufficientLiquidity();
@@ -15,6 +16,7 @@ interface ITreasury {
     event usdcWithdrawnFromClosePosition(uint256 indexed amount, address indexed to, uint256 indexed slot);
     event LiquidityInjected(uint256 indexed amount, uint256 indexed slot);
     event FeesUsedToInjectLiquidity(uint256 indexed amount, uint256 indexed slot);
+    event FeesCollected(uint256 indexed amount, address indexed to);
     event usdcWithdrawnFromClaimYield(uint256 indexed amount, address indexed to, uint256 indexed slot);
     event FeeGenerated(uint256 indexed depositFee, uint256 indexed yieldFee, uint256 indexed exitFee, uint256 slot);
 

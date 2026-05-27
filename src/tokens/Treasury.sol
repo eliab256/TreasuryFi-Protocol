@@ -42,6 +42,10 @@ contract Treasury is AccessControl, ITreasury {
     }
 
     constructor(address _admin, address _usdc, address _feeCollector, address _liquidityDepositor) {
+        if(_admin == address(0) || _usdc == address(0) || _feeCollector == address(0) || _liquidityDepositor == address(0)) {
+            revert Treasury__ZeroAddress();
+        }
+
         i_usdc = IERC20(_usdc);
         _setupRole(DEFAULT_ADMIN_ROLE, _admin);
         _setupRole(FEES_COLLECTOR_ROLE, _feeCollector);
@@ -51,6 +55,7 @@ contract Treasury is AccessControl, ITreasury {
     /// @dev Inherited from ITreasury. See interface for details.
     function setTokenContract(address _tokenContract) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (_tokenContract == address(0)) revert Treasury__ZeroAddress();
+        if (hasRole(TOKEN_CONTRACT_ROLE, _tokenContract)) revert Treasury__TokenContractAlreadySet();
         grantRole(TOKEN_CONTRACT_ROLE, _tokenContract);
     }
 
@@ -132,6 +137,10 @@ contract Treasury is AccessControl, ITreasury {
 
     /// @dev Inherited from ITreasury. See interface for details.
     function collectFees(uint256 _amount, address _to) external onlyRole(FEES_COLLECTOR_ROLE){
+        if(_amount == type(uint256).max){
+            _amount = s_totalFeesToBeCollected;
+        }
+
         if(_amount > s_totalFeesToBeCollected){
             revert Treasury__AmountExceedsTotalFeesToBeCollected();
         }
@@ -140,6 +149,9 @@ contract Treasury is AccessControl, ITreasury {
 
         // 2. transfer USDC from the treasury to the fee collector
         i_usdc.safeTransfer(_to, _amount);
+
+        // 3. emit event FeesUsedToInjectLiquidity
+        emit FeesCollected(_amount, _to);
     }
 
     /// @dev Inherited from ITreasury. See interface for details.

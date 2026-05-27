@@ -24,16 +24,16 @@ contract ReservesFunctionsConsumer is IReservesFunctionsConsumer, FunctionsClien
     uint64 internal s_subscriptionId;
 
     constructor(
-        address router,
-        bytes32 donID,
-        uint32 gasLimit,
-        address oracle,
+        address _router,
+        bytes32 _donID,
+        uint32 _gasLimit,
+        address _oracle,
         address _admin
-    ) FunctionsClient(router) {
-        if (oracle == address(0) || _admin == address(0)) revert ReservesFunctionsConsumer__ZeroAddress();
-        i_donID = donID;
-        i_gasLimit = gasLimit;
-        i_oracle = oracle;
+    ) FunctionsClient(_router) {
+        if (_oracle == address(0) || _admin == address(0) || _router == address(0)) revert ReservesFunctionsConsumer__ZeroAddress();
+        i_donID = _donID;
+        i_gasLimit = _gasLimit;
+        i_oracle = _oracle;
 
         _grantRole(DEFAULT_ADMIN_ROLE, _admin);
     }
